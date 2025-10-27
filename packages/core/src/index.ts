@@ -30,7 +30,9 @@ export * from "./migration/apply.js";
 export * from "./migration/diff.js";
 
 // Files
+export * from "./files/dump.js";
 export * from "./files/apply.js";
+export * from "./files/relink.js";
 
 // Menus
 export * from "./menus/dump.js";

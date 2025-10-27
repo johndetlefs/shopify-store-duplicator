@@ -35,6 +35,7 @@ import {
   applyPageMetafields,
   diffData,
   buildDestinationIndex,
+  applyFiles,
   dumpMenus,
   applyMenus,
   dumpRedirects,
@@ -330,6 +331,10 @@ program
     }
 
     logger.info("✓ Data apply complete", {
+      files: {
+        uploaded: result.data.files.uploaded,
+        failed: result.data.files.failed,
+      },
       metaobjects: {
         total: result.data.metaobjects.total,
         created: result.data.metaobjects.created,
@@ -390,11 +395,46 @@ program
 
 program
   .command("files:apply")
-  .description("Seed files to destination store")
-  .option("-i, --input <file>", "Files manifest JSON")
+  .description("Seed files to destination store from dump")
+  .option("-i, --input <file>", "Files JSONL file", "./dumps/files.jsonl")
   .action(async (options) => {
-    logger.warn("files:apply not yet implemented");
-    process.exit(1);
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.dstShop || !globalOpts.dstToken) {
+      logger.error(
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.dstShop,
+      accessToken: globalOpts.dstToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    if (globalOpts.dryRun) {
+      logger.info("[DRY RUN] Would apply files from:", options.input);
+      return;
+    }
+
+    logger.info(`Applying files from ${options.input}`);
+
+    const result = await applyFiles(client, options.input);
+
+    if (!result.ok) {
+      logger.error("Files apply failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    logger.info("✓ Files apply complete", {
+      uploaded: result.data.urlToGid.size,
+      mappings: result.data.gidToGid.size,
+    });
   });
 
 /**

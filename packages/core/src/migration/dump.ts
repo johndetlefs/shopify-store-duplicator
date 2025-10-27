@@ -29,6 +29,7 @@ import {
 import { GraphQLClient } from "../graphql/client.js";
 import { logger } from "../utils/logger.js";
 import { err, type Result } from "../utils/types.js";
+import { dumpFiles } from "../files/dump.js";
 
 // ============================================================================
 // Types
@@ -711,6 +712,11 @@ export async function dumpAllData(
   const shopMetafieldsResult = await dumpShopMetafields(client, outputDir);
   if (!shopMetafieldsResult.ok) {
     logger.warn("Shop metafields dump failed, continuing...");
+  }
+
+  const filesResult = await dumpFiles(client, outputDir);
+  if (!filesResult.ok) {
+    logger.warn("Files dump failed, continuing...");
   }
 
   logger.info("=== Data Dump Complete ===");

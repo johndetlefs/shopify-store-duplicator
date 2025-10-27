@@ -509,6 +509,43 @@ export const FILE_CREATE = `
   }
 `;
 
+export const FILES_BULK = `
+  {
+    files {
+      edges {
+        node {
+          ... on MediaImage {
+            id
+            alt
+            createdAt
+            fileStatus
+            image {
+              url
+            }
+          }
+          ... on Video {
+            id
+            alt
+            createdAt
+            fileStatus
+            sources {
+              url
+            }
+          }
+          ... on GenericFile {
+            id
+            alt
+            createdAt
+            fileStatus
+            url
+            mimeType
+          }
+        }
+      }
+    }
+  }
+`;
+
 /**
  * Pages
  */

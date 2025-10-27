@@ -28,6 +28,8 @@ import {
   PAGE_CREATE,
   PAGE_UPDATE,
 } from "../graphql/queries.js";
+import { applyFiles, type FileIndex } from "../files/apply.js";
+import { relinkMetaobjects } from "../files/relink.js";
 import {
   buildDestinationIndex,
   indexMetaobjectType,
@@ -336,12 +338,14 @@ function buildMetafieldValue(
 
 /**
  * Apply metaobjects of a specific type from a dump file.
+ * Applies file relinking before upserting if fileIndex is provided.
  */
 async function applyMetaobjectsForType(
   client: GraphQLClient,
   type: string,
   inputFile: string,
-  index: DestinationIndex
+  index: DestinationIndex,
+  fileIndex?: FileIndex
 ): Promise<ApplyStats> {
   logger.info(`Applying metaobjects of type: ${type}`);
 
@@ -363,12 +367,18 @@ async function applyMetaobjectsForType(
   const content = fs.readFileSync(inputFile, "utf-8");
   const lines = content.split("\n").filter((l) => l.trim());
 
-  for (const line of lines) {
+  // Parse all metaobjects
+  const metaobjects: DumpedMetaobject[] = lines.map((line) => JSON.parse(line));
+
+  // Relink file references if fileIndex provided
+  const relinkedMetaobjects = fileIndex
+    ? relinkMetaobjects(metaobjects, fileIndex)
+    : metaobjects;
+
+  for (const metaobj of relinkedMetaobjects) {
     stats.total++;
 
     try {
-      const metaobj = JSON.parse(line) as DumpedMetaobject;
-
       // Build fields with remapped references
       const fields: Array<{ key: string; value: string | null }> = [];
 
@@ -435,7 +445,8 @@ async function applyMetaobjectsForType(
 export async function applyMetaobjects(
   client: GraphQLClient,
   inputDir: string,
-  index: DestinationIndex
+  index: DestinationIndex,
+  fileIndex?: FileIndex
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Metaobjects ===");
 
@@ -469,8 +480,14 @@ export async function applyMetaobjects(
     // Index this type in destination first
     await indexMetaobjectType(client, type, index);
 
-    // Apply metaobjects
-    const stats = await applyMetaobjectsForType(client, type, inputFile, index);
+    // Apply metaobjects with file relinking
+    const stats = await applyMetaobjectsForType(
+      client,
+      type,
+      inputFile,
+      index,
+      fileIndex
+    );
 
     // Aggregate stats
     aggregateStats.total += stats.total;
@@ -1130,16 +1147,22 @@ export async function applyPages(
  *
  * Order:
  * 1. Build destination index
- * 2. Apply metaobjects (with remapped refs)
- * 3. Apply pages (create/update content)
- * 4. Apply metafields to products, collections, pages
+ * 2. Apply files (upload and build file index for relinking)
+ * 3. Apply metaobjects (with remapped refs including files)
+ * 4. Apply pages (create/update content)
+ * 5. Apply metafields to products, collections, pages, shop
  */
 export async function applyAllData(
   client: GraphQLClient,
   inputDir: string
 ): Promise<
   Result<
-    { metaobjects: ApplyStats; pages: ApplyStats; metafields: ApplyStats },
+    {
+      metaobjects: ApplyStats;
+      pages: ApplyStats;
+      metafields: ApplyStats;
+      files: { uploaded: number; failed: number };
+    },
     Error
   >
 > {
@@ -1149,9 +1172,27 @@ export async function applyAllData(
   logger.info("Step 1: Building destination index...");
   const index = await buildDestinationIndex(client);
 
-  // Step 2: Apply metaobjects
-  logger.info("Step 2: Applying metaobjects...");
-  const metaobjectsResult = await applyMetaobjects(client, inputDir, index);
+  // Step 2: Apply files (BEFORE metaobjects so we can relink file references)
+  logger.info("Step 2: Applying files...");
+  const filesFile = path.join(inputDir, "files.jsonl");
+  const filesResult = await applyFiles(client, filesFile);
+
+  let fileIndex: FileIndex;
+  if (!filesResult.ok) {
+    logger.warn("Files apply failed, continuing without file relinking...");
+    fileIndex = { urlToGid: new Map(), gidToGid: new Map() };
+  } else {
+    fileIndex = filesResult.data;
+  }
+
+  // Step 3: Apply metaobjects (with file relinking)
+  logger.info("Step 3: Applying metaobjects...");
+  const metaobjectsResult = await applyMetaobjects(
+    client,
+    inputDir,
+    index,
+    fileIndex
+  );
   if (!metaobjectsResult.ok) {
     return err(metaobjectsResult.error);
   }
@@ -1160,8 +1201,8 @@ export async function applyAllData(
   logger.info("Rebuilding index after metaobject creation...");
   const updatedIndex = await buildDestinationIndex(client);
 
-  // Step 3: Apply pages (create/update content before metafields)
-  logger.info("Step 3: Applying pages...");
+  // Step 4: Apply pages (create/update content before metafields)
+  logger.info("Step 4: Applying pages...");
   const pagesFile = path.join(inputDir, "pages.jsonl");
   const pagesResult = await applyPages(client, pagesFile, updatedIndex);
   if (!pagesResult.ok) {
@@ -1172,8 +1213,8 @@ export async function applyAllData(
   logger.info("Rebuilding index after page creation...");
   const finalIndex = await buildDestinationIndex(client);
 
-  // Step 4: Apply metafields
-  logger.info("Step 4: Applying metafields...");
+  // Step 5: Apply metafields
+  logger.info("Step 5: Applying metafields...");
 
   const aggregateMetafields: ApplyStats = {
     total: 0,
@@ -1240,6 +1281,9 @@ export async function applyAllData(
   }
 
   logger.info("=== Data Apply Complete ===", {
+    files: {
+      uploaded: fileIndex.urlToGid.size,
+    },
     metaobjects: {
       total: metaobjectsResult.data.total,
       created: metaobjectsResult.data.created,
@@ -1259,6 +1303,10 @@ export async function applyAllData(
   });
 
   return ok({
+    files: {
+      uploaded: fileIndex.urlToGid.size,
+      failed: 0, // TODO: track failed uploads
+    },
     metaobjects: metaobjectsResult.data,
     pages: pagesResult.ok
       ? pagesResult.data

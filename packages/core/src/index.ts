@@ -33,3 +33,7 @@ export * from "./files/apply.js";
 // Menus
 export * from "./menus/dump.js";
 export * from "./menus/apply.js";
+
+// Redirects
+export * from "./redirects/dump.js";
+export * from "./redirects/apply.js";

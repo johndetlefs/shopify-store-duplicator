@@ -35,6 +35,8 @@ import {
   buildDestinationIndex,
   dumpMenus,
   applyMenus,
+  dumpRedirects,
+  applyRedirects,
   logger,
   type GraphQLClientConfig,
 } from "@shopify-duplicator/core";
@@ -505,19 +507,92 @@ program
 program
   .command("redirects:dump")
   .description("Dump redirects from source store")
-  .option("-o, --output <file>", "Output file")
+  .option("-o, --output <file>", "Output file", "./dumps/redirects.json")
   .action(async (options) => {
-    logger.warn("redirects:dump not yet implemented");
-    process.exit(1);
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.srcShop || !globalOpts.srcToken) {
+      logger.error(
+        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.srcShop,
+      accessToken: globalOpts.srcToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    logger.info(`Dumping redirects to ${options.output}`);
+
+    const result = await dumpRedirects(client, options.output);
+
+    if (!result.ok) {
+      logger.error("Redirects dump failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    logger.info("✓ Redirects dump complete");
   });
 
 program
   .command("redirects:apply")
   .description("Apply redirects to destination store")
-  .option("-f, --file <file>", "Input file")
+  .option("-f, --file <file>", "Input file", "./dumps/redirects.json")
   .action(async (options) => {
-    logger.warn("redirects:apply not yet implemented");
-    process.exit(1);
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.dstShop || !globalOpts.dstToken) {
+      logger.error(
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.dstShop,
+      accessToken: globalOpts.dstToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    if (globalOpts.dryRun) {
+      logger.info("[DRY RUN] Would apply redirects from:", options.file);
+      return;
+    }
+
+    logger.info(`Applying redirects from ${options.file}`);
+
+    const result = await applyRedirects(client, options.file);
+
+    if (!result.ok) {
+      logger.error("Redirects apply failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    logger.info("✓ Redirects apply complete", {
+      created: result.data.created,
+      skipped: result.data.skipped,
+      failed: result.data.failed,
+    });
+
+    // Report errors
+    if (result.data.errors.length > 0) {
+      logger.warn("Redirect errors:", result.data.errors.slice(0, 10));
+    }
+
+    if (result.data.failed > 0) {
+      logger.warn(`${result.data.failed} redirects failed to apply`);
+      process.exit(1);
+    }
   });
 
 // Parse and execute

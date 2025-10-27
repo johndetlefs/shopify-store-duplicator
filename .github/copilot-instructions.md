@@ -24,16 +24,21 @@ Use **Shopify Admin GraphQL** with **Bulk Operations** for large reads/writes wh
 ## Repo layout (monorepo-lite)
 
 ```
+
+```
+
 /packages/core
 /src/bulk/ # bulk launcher, poller, downloader, JSONL parser
 /src/defs/ # dump/apply metaobject & metafield definitions
-/src/data/ # dump/apply metaobjects (entries), metafields, pages/articles/blogs
+/src/migration/ # dump/apply metaobjects (entries), metafields, pages/articles/blogs
 /src/files/ # stagedUploadsCreate + fileCreate helpers
 /src/menus/ # dump/apply menus
 /src/redirects/ # dump/apply redirects
 /src/map/ # handle/type mapping + gid resolvers
 /src/graphql/ # typed queries/mutations (strings + minimal types)
 /src/utils/ # throttling, retries, chunking, logger
+
+```
 
 /apps/cli
 /src/index.ts # commander-based CLI wiring commands

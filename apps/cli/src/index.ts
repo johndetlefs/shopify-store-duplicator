@@ -22,6 +22,17 @@ import {
   createGraphQLClient,
   dumpDefinitions,
   applyDefinitions,
+  dumpAllData,
+  dumpMetaobjects,
+  dumpProducts,
+  dumpCollections,
+  dumpPages,
+  applyAllData,
+  applyMetaobjects,
+  applyProductMetafields,
+  applyCollectionMetafields,
+  applyPageMetafields,
+  buildDestinationIndex,
   logger,
   type GraphQLClientConfig,
 } from "@shopify-duplicator/core";
@@ -217,16 +228,61 @@ program
   });
 
 /**
- * DATA COMMANDS (Stubs for now - to be implemented)
+ * DATA COMMANDS
  */
 
 program
   .command("data:dump")
   .description("Dump metaobjects, metafields, and CMS content from source")
   .option("-o, --output <dir>", "Output directory", "./dumps")
+  .option("--metaobjects-only", "Dump only metaobjects", false)
+  .option("--products-only", "Dump only products", false)
+  .option("--collections-only", "Dump only collections", false)
+  .option("--pages-only", "Dump only pages", false)
   .action(async (options) => {
-    logger.warn("data:dump not yet implemented");
-    process.exit(1);
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.srcShop || !globalOpts.srcToken) {
+      logger.error(
+        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.srcShop,
+      accessToken: globalOpts.srcToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    logger.info(`Dumping data from source store to ${options.output}`);
+
+    let result;
+
+    // Selective dump based on flags
+    if (options.metaobjectsOnly) {
+      result = await dumpMetaobjects(client, options.output);
+    } else if (options.productsOnly) {
+      result = await dumpProducts(client, options.output);
+    } else if (options.collectionsOnly) {
+      result = await dumpCollections(client, options.output);
+    } else if (options.pagesOnly) {
+      result = await dumpPages(client, options.output);
+    } else {
+      // Dump everything
+      result = await dumpAllData(client, options.output);
+    }
+
+    if (!result.ok) {
+      logger.error("Data dump failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    logger.info("✓ Data dump complete");
   });
 
 program
@@ -234,8 +290,83 @@ program
   .description("Apply data to destination store")
   .option("-i, --input <dir>", "Input directory", "./dumps")
   .action(async (options) => {
-    logger.warn("data:apply not yet implemented");
-    process.exit(1);
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.dstShop || !globalOpts.dstToken) {
+      logger.error(
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.dstShop,
+      accessToken: globalOpts.dstToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    if (globalOpts.dryRun) {
+      logger.info("[DRY RUN] Would apply data from:", options.input);
+      return;
+    }
+
+    logger.info(`Applying data from ${options.input} to destination store`);
+
+    const result = await applyAllData(client, options.input);
+
+    if (!result.ok) {
+      logger.error("Data apply failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    logger.info("✓ Data apply complete", {
+      metaobjects: {
+        total: result.data.metaobjects.total,
+        created: result.data.metaobjects.created,
+        failed: result.data.metaobjects.failed,
+      },
+      pages: {
+        total: result.data.pages.total,
+        created: result.data.pages.created,
+        updated: result.data.pages.updated,
+        failed: result.data.pages.failed,
+      },
+      metafields: {
+        total: result.data.metafields.total,
+        created: result.data.metafields.created,
+        failed: result.data.metafields.failed,
+      },
+    });
+
+    // Report errors
+    if (result.data.metaobjects.errors.length > 0) {
+      logger.warn(
+        "Metaobject errors:",
+        result.data.metaobjects.errors.slice(0, 10)
+      );
+    }
+    if (result.data.pages.errors.length > 0) {
+      logger.warn("Page errors:", result.data.pages.errors.slice(0, 10));
+    }
+    if (result.data.metafields.errors.length > 0) {
+      logger.warn(
+        "Metafield errors:",
+        result.data.metafields.errors.slice(0, 10)
+      );
+    }
+
+    const totalFailed =
+      result.data.metaobjects.failed +
+      result.data.pages.failed +
+      result.data.metafields.failed;
+    if (totalFailed > 0) {
+      logger.warn(`${totalFailed} items failed to apply`);
+      process.exit(1);
+    }
   });
 
 program

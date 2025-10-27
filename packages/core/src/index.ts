@@ -22,10 +22,12 @@ export * from "./map/ids.js";
 // Definitions
 export * from "./defs/dump.js";
 export * from "./defs/apply.js";
+export * from "./defs/diff.js";
 
 // Migration operations (dump/apply data)
 export * from "./migration/dump.js";
 export * from "./migration/apply.js";
+export * from "./migration/diff.js";
 
 // Files
 export * from "./files/apply.js";

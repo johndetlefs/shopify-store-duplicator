@@ -22,6 +22,7 @@ import {
   createGraphQLClient,
   dumpDefinitions,
   applyDefinitions,
+  diffDefinitions,
   dumpAllData,
   dumpMetaobjects,
   dumpProducts,
@@ -32,6 +33,7 @@ import {
   applyProductMetafields,
   applyCollectionMetafields,
   applyPageMetafields,
+  diffData,
   buildDestinationIndex,
   dumpMenus,
   applyMenus,
@@ -591,6 +593,261 @@ program
 
     if (result.data.failed > 0) {
       logger.warn(`${result.data.failed} redirects failed to apply`);
+      process.exit(1);
+    }
+  });
+
+/**
+ * DIFF COMMANDS
+ */
+
+program
+  .command("defs:diff")
+  .description("Compare source definitions dump with destination store")
+  .option(
+    "-f, --file <file>",
+    "Source definitions file",
+    "./dumps/definitions.json"
+  )
+  .action(async (options) => {
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.dstShop || !globalOpts.dstToken) {
+      logger.error(
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.dstShop,
+      accessToken: globalOpts.dstToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    logger.info(`Comparing definitions: ${options.file} vs destination store`);
+
+    const result = await diffDefinitions(client, options.file);
+
+    if (!result.ok) {
+      logger.error("Definitions diff failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    const diff = result.data;
+
+    // Display results
+    logger.info("=== DEFINITIONS DIFF RESULTS ===");
+
+    if (diff.summary.isIdentical) {
+      logger.info("✓ Definitions are identical!");
+    } else {
+      logger.warn(`Found ${diff.summary.totalIssues} differences`);
+
+      // Metaobject differences
+      if (diff.metaobjects.missing.length > 0) {
+        logger.warn(
+          `\n❌ Missing metaobject types (${diff.metaobjects.missing.length}):`
+        );
+        diff.metaobjects.missing.forEach((type) => logger.warn(`  - ${type}`));
+      }
+
+      if (diff.metaobjects.extra.length > 0) {
+        logger.warn(
+          `\n➕ Extra metaobject types (${diff.metaobjects.extra.length}):`
+        );
+        diff.metaobjects.extra.forEach((type) => logger.warn(`  - ${type}`));
+      }
+
+      if (diff.metaobjects.changed.length > 0) {
+        logger.warn(
+          `\n⚠️  Changed metaobject types (${diff.metaobjects.changed.length}):`
+        );
+        diff.metaobjects.changed.forEach(({ type, changes }) => {
+          logger.warn(`  - ${type}:`);
+          changes.forEach((change) => logger.warn(`      ${change}`));
+        });
+      }
+
+      // Metafield differences
+      if (diff.metafields.missing.length > 0) {
+        logger.warn(
+          `\n❌ Missing metafield definitions (${diff.metafields.missing.length}):`
+        );
+        diff.metafields.missing
+          .slice(0, 20)
+          .forEach((triplet) => logger.warn(`  - ${triplet}`));
+        if (diff.metafields.missing.length > 20) {
+          logger.warn(`  ... and ${diff.metafields.missing.length - 20} more`);
+        }
+      }
+
+      if (diff.metafields.extra.length > 0) {
+        logger.warn(
+          `\n➕ Extra metafield definitions (${diff.metafields.extra.length}):`
+        );
+        diff.metafields.extra
+          .slice(0, 20)
+          .forEach((triplet) => logger.warn(`  - ${triplet}`));
+        if (diff.metafields.extra.length > 20) {
+          logger.warn(`  ... and ${diff.metafields.extra.length - 20} more`);
+        }
+      }
+
+      if (diff.metafields.changed.length > 0) {
+        logger.warn(
+          `\n⚠️  Changed metafield definitions (${diff.metafields.changed.length}):`
+        );
+        diff.metafields.changed.slice(0, 10).forEach(({ triplet, changes }) => {
+          logger.warn(`  - ${triplet}:`);
+          changes.forEach((change) => logger.warn(`      ${change}`));
+        });
+        if (diff.metafields.changed.length > 10) {
+          logger.warn(`  ... and ${diff.metafields.changed.length - 10} more`);
+        }
+      }
+
+      process.exit(1);
+    }
+  });
+
+program
+  .command("data:diff")
+  .description("Compare source data dump with destination store")
+  .option("-d, --dir <directory>", "Dump directory", "./dumps")
+  .action(async (options) => {
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.dstShop || !globalOpts.dstToken) {
+      logger.error(
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.dstShop,
+      accessToken: globalOpts.dstToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    logger.info(`Comparing data: ${options.dir} vs destination store`);
+
+    const result = await diffData(client, options.dir);
+
+    if (!result.ok) {
+      logger.error("Data diff failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    const diff = result.data;
+
+    // Display results
+    logger.info("=== DATA DIFF RESULTS ===");
+
+    if (diff.summary.isIdentical) {
+      logger.info("✓ Data is identical!");
+    } else {
+      logger.warn(
+        `Found ${diff.summary.totalMissing} missing, ${diff.summary.totalExtra} extra`
+      );
+
+      // Metaobjects by type
+      const metaobjectTypes = Object.keys(diff.metaobjects);
+      if (metaobjectTypes.length > 0) {
+        logger.info("\n📦 Metaobjects:");
+        metaobjectTypes.forEach((type) => {
+          const typeDiff = diff.metaobjects[type];
+          if (typeDiff.missing.length > 0 || typeDiff.extra.length > 0) {
+            logger.warn(`  ${type}:`);
+            if (typeDiff.missing.length > 0) {
+              logger.warn(`    ❌ Missing: ${typeDiff.missing.length} handles`);
+              typeDiff.missing
+                .slice(0, 5)
+                .forEach((h) => logger.warn(`       - ${h}`));
+              if (typeDiff.missing.length > 5) {
+                logger.warn(
+                  `       ... and ${typeDiff.missing.length - 5} more`
+                );
+              }
+            }
+            if (typeDiff.extra.length > 0) {
+              logger.warn(`    ➕ Extra: ${typeDiff.extra.length} handles`);
+            }
+          }
+        });
+      }
+
+      // Products
+      if (diff.products.missing.length > 0 || diff.products.extra.length > 0) {
+        logger.info("\n🛍️  Products:");
+        if (diff.products.missing.length > 0) {
+          logger.warn(`  ❌ Missing: ${diff.products.missing.length} products`);
+          diff.products.missing
+            .slice(0, 10)
+            .forEach((h) => logger.warn(`     - ${h}`));
+          if (diff.products.missing.length > 10) {
+            logger.warn(
+              `     ... and ${diff.products.missing.length - 10} more`
+            );
+          }
+        }
+        if (diff.products.extra.length > 0) {
+          logger.warn(`  ➕ Extra: ${diff.products.extra.length} products`);
+        }
+      }
+
+      // Collections
+      if (
+        diff.collections.missing.length > 0 ||
+        diff.collections.extra.length > 0
+      ) {
+        logger.info("\n📚 Collections:");
+        if (diff.collections.missing.length > 0) {
+          logger.warn(
+            `  ❌ Missing: ${diff.collections.missing.length} collections`
+          );
+          diff.collections.missing
+            .slice(0, 10)
+            .forEach((h) => logger.warn(`     - ${h}`));
+          if (diff.collections.missing.length > 10) {
+            logger.warn(
+              `     ... and ${diff.collections.missing.length - 10} more`
+            );
+          }
+        }
+        if (diff.collections.extra.length > 0) {
+          logger.warn(
+            `  ➕ Extra: ${diff.collections.extra.length} collections`
+          );
+        }
+      }
+
+      // Pages
+      if (diff.pages.missing.length > 0 || diff.pages.extra.length > 0) {
+        logger.info("\n📄 Pages:");
+        if (diff.pages.missing.length > 0) {
+          logger.warn(`  ❌ Missing: ${diff.pages.missing.length} pages`);
+          diff.pages.missing
+            .slice(0, 10)
+            .forEach((h) => logger.warn(`     - ${h}`));
+          if (diff.pages.missing.length > 10) {
+            logger.warn(`     ... and ${diff.pages.missing.length - 10} more`);
+          }
+        }
+        if (diff.pages.extra.length > 0) {
+          logger.warn(`  ➕ Extra: ${diff.pages.extra.length} pages`);
+        }
+      }
+
       process.exit(1);
     }
   });

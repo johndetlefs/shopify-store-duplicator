@@ -539,6 +539,73 @@ export const PAGES_BULK = `
   }
 `;
 
+/**
+ * Shop (for shop-level metafields)
+ */
+export const SHOP_BULK = `
+  {
+    shop {
+      id
+      name
+      metafields(first: 250) {
+        edges {
+          node {
+            id
+            namespace
+            key
+            value
+            type
+            reference {
+              __typename
+              ... on Metaobject {
+                id
+                type
+                handle
+              }
+              ... on Product {
+                id
+                handle
+              }
+              ... on Collection {
+                id
+                handle
+              }
+              ... on Page {
+                id
+                handle
+              }
+            }
+            references(first: 250) {
+              edges {
+                node {
+                  __typename
+                  ... on Metaobject {
+                    id
+                    type
+                    handle
+                  }
+                  ... on Product {
+                    id
+                    handle
+                  }
+                  ... on Collection {
+                    id
+                    handle
+                  }
+                  ... on Page {
+                    id
+                    handle
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
 export const PAGE_CREATE = `
   mutation pageCreate($page: PageCreateInput!) {
     pageCreate(page: $page) {

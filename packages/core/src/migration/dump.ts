@@ -23,6 +23,7 @@ import {
   PRODUCTS_BULK,
   COLLECTIONS_BULK,
   PAGES_BULK,
+  SHOP_BULK,
   METAOBJECT_DEFINITIONS_QUERY,
 } from "../graphql/queries.js";
 import { GraphQLClient } from "../graphql/client.js";
@@ -628,6 +629,55 @@ export async function dumpPages(
 }
 
 /**
+ * Dump shop-level metafields
+ */
+export async function dumpShopMetafields(
+  client: GraphQLClient,
+  outputDir: string
+): Promise<Result<void, Error>> {
+  logger.info("=== Dumping Shop Metafields ===");
+
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  const result = await runBulkQueryAndDownload(client, SHOP_BULK);
+  if (!result.ok) {
+    logger.error("Failed to dump shop metafields:", result.error);
+    return { ok: false, error: result.error };
+  }
+
+  // Parse JSONL stream - shop is returned as a single object
+  let shopMetafields: DumpedMetafield[] = [];
+
+  for await (const entry of result.data) {
+    try {
+      // The bulk query returns the shop object
+      const shop = entry as {
+        id: string;
+        name: string;
+        metafields?: MetafieldEdge[];
+      };
+      if (shop.metafields) {
+        shopMetafields = shop.metafields.map((e) => transformMetafield(e.node));
+      }
+    } catch (err) {
+      logger.warn("Failed to parse shop entry:", { error: String(err) });
+    }
+  }
+
+  // Write to file
+  const outputFile = path.join(outputDir, "shop-metafields.jsonl");
+  const content = shopMetafields.map((mf) => JSON.stringify(mf)).join("\n");
+  fs.writeFileSync(outputFile, content, "utf-8");
+
+  logger.info(
+    `✓ Dumped ${shopMetafields.length} shop metafields to ${outputFile}`
+  );
+  return { ok: true, data: undefined };
+}
+
+/**
  * Dump all data: metaobjects, products, collections, pages
  */
 export async function dumpAllData(
@@ -656,6 +706,11 @@ export async function dumpAllData(
   const pagesResult = await dumpPages(client, outputDir);
   if (!pagesResult.ok) {
     logger.warn("Pages dump failed, continuing...");
+  }
+
+  const shopMetafieldsResult = await dumpShopMetafields(client, outputDir);
+  if (!shopMetafieldsResult.ok) {
+    logger.warn("Shop metafields dump failed, continuing...");
   }
 
   logger.info("=== Data Dump Complete ===");

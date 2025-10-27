@@ -165,12 +165,9 @@ function remapReference(
   }
 
   if (field.refVariant) {
-    const skuOrPosition = field.refVariant.sku || `pos${field.refVariant.position || 0}`;
-    return gidForVariant(
-      index,
-      field.refVariant.productHandle,
-      skuOrPosition
-    );
+    const skuOrPosition =
+      field.refVariant.sku || `pos${field.refVariant.position || 0}`;
+    return gidForVariant(index, field.refVariant.productHandle, skuOrPosition);
   }
 
   if (field.refCollection) {
@@ -234,7 +231,11 @@ function remapMetafieldReference(
   index: DestinationIndex
 ): string | undefined {
   if (mf.refMetaobject) {
-    return gidForMetaobject(index, mf.refMetaobject.type, mf.refMetaobject.handle);
+    return gidForMetaobject(
+      index,
+      mf.refMetaobject.type,
+      mf.refMetaobject.handle
+    );
   }
 
   if (mf.refProduct) {
@@ -400,7 +401,9 @@ async function applyMetaobjectsForType(
       const response = result.data.data?.metaobjectUpsert;
       if (response?.userErrors && response.userErrors.length > 0) {
         stats.failed++;
-        const errorMsg = response.userErrors.map((e: any) => e.message).join(", ");
+        const errorMsg = response.userErrors
+          .map((e: any) => e.message)
+          .join(", ");
         stats.errors.push({ handle: metaobj.handle, error: errorMsg });
         logger.warn(`Metaobject upsert user errors for ${metaobj.handle}`, {
           errors: response.userErrors,
@@ -414,7 +417,9 @@ async function applyMetaobjectsForType(
     } catch (error) {
       stats.failed++;
       stats.errors.push({ error: String(error) });
-      logger.warn("Failed to process metaobject line", { error: String(error) });
+      logger.warn("Failed to process metaobject line", {
+        error: String(error),
+      });
     }
   }
 
@@ -444,7 +449,9 @@ export async function applyMetaobjects(
   };
 
   // Find all metaobject-*.jsonl files
-  const files = fs.readdirSync(inputDir).filter((f) => f.startsWith("metaobjects-") && f.endsWith(".jsonl"));
+  const files = fs
+    .readdirSync(inputDir)
+    .filter((f) => f.startsWith("metaobjects-") && f.endsWith(".jsonl"));
 
   if (files.length === 0) {
     logger.warn("No metaobject dump files found");
@@ -574,7 +581,9 @@ export async function applyProductMetafields(
 
   // Batch metafields in chunks of 25 (Shopify limit)
   const chunks = chunkArray(allMetafields, 25);
-  logger.info(`Setting ${allMetafields.length} product metafields in ${chunks.length} batches`);
+  logger.info(
+    `Setting ${allMetafields.length} product metafields in ${chunks.length} batches`
+  );
 
   for (const chunk of chunks) {
     stats.total += chunk.length;
@@ -619,7 +628,9 @@ export async function applyProductMetafields(
     }
   }
 
-  logger.info(`✓ Applied ${stats.created} product metafields (${stats.failed} failed)`);
+  logger.info(
+    `✓ Applied ${stats.created} product metafields (${stats.failed} failed)`
+  );
   return ok(stats);
 }
 
@@ -664,7 +675,9 @@ export async function applyCollectionMetafields(
       const collectionGid = gidForCollectionHandle(index, collection.handle);
 
       if (!collectionGid) {
-        logger.warn(`Collection not found in destination: ${collection.handle}`);
+        logger.warn(
+          `Collection not found in destination: ${collection.handle}`
+        );
         stats.skipped++;
         continue;
       }
@@ -680,13 +693,17 @@ export async function applyCollectionMetafields(
         });
       }
     } catch (error) {
-      logger.warn("Failed to process collection line", { error: String(error) });
+      logger.warn("Failed to process collection line", {
+        error: String(error),
+      });
     }
   }
 
   // Batch in chunks of 25
   const chunks = chunkArray(allMetafields, 25);
-  logger.info(`Setting ${allMetafields.length} collection metafields in ${chunks.length} batches`);
+  logger.info(
+    `Setting ${allMetafields.length} collection metafields in ${chunks.length} batches`
+  );
 
   for (const chunk of chunks) {
     stats.total += chunk.length;
@@ -726,7 +743,9 @@ export async function applyCollectionMetafields(
     }
   }
 
-  logger.info(`✓ Applied ${stats.created} collection metafields (${stats.failed} failed)`);
+  logger.info(
+    `✓ Applied ${stats.created} collection metafields (${stats.failed} failed)`
+  );
   return ok(stats);
 }
 
@@ -793,7 +812,9 @@ export async function applyPageMetafields(
 
   // Batch in chunks of 25
   const chunks = chunkArray(allMetafields, 25);
-  logger.info(`Setting ${allMetafields.length} page metafields in ${chunks.length} batches`);
+  logger.info(
+    `Setting ${allMetafields.length} page metafields in ${chunks.length} batches`
+  );
 
   for (const chunk of chunks) {
     stats.total += chunk.length;
@@ -833,7 +854,128 @@ export async function applyPageMetafields(
     }
   }
 
-  logger.info(`✓ Applied ${stats.created} page metafields (${stats.failed} failed)`);
+  logger.info(
+    `✓ Applied ${stats.created} page metafields (${stats.failed} failed)`
+  );
+  return ok(stats);
+}
+
+/**
+ * Apply shop-level metafields.
+ * Shop GID is queried directly (there's only one shop per store).
+ */
+export async function applyShopMetafields(
+  client: GraphQLClient,
+  inputFile: string,
+  index: DestinationIndex
+): Promise<Result<ApplyStats, Error>> {
+  logger.info("=== Applying Shop Metafields ===");
+
+  const stats: ApplyStats = {
+    total: 0,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+    errors: [],
+  };
+
+  if (!fs.existsSync(inputFile)) {
+    logger.warn(`Shop metafields dump not found: ${inputFile}`);
+    return ok(stats);
+  }
+
+  // Query the shop GID
+  const shopQueryResult = await client.request<{ shop: { id: string } }>({
+    query: `{ shop { id } }`,
+    variables: {},
+  });
+
+  if (!shopQueryResult.ok || !shopQueryResult.data.data?.shop?.id) {
+    logger.error("Failed to query shop ID");
+    return err(new Error("Could not retrieve shop ID"));
+  }
+
+  const shopGid = shopQueryResult.data.data.shop.id;
+  logger.info(`Retrieved shop GID: ${shopGid}`);
+
+  const content = fs.readFileSync(inputFile, "utf-8");
+  const lines = content.split("\n").filter((l) => l.trim());
+
+  const allMetafields: Array<{
+    namespace: string;
+    key: string;
+    value: string;
+    type: string;
+    ownerId: string;
+  }> = [];
+
+  for (const line of lines) {
+    try {
+      const mf = JSON.parse(line) as DumpedMetafield;
+      const value = buildMetafieldValue(mf, index);
+      allMetafields.push({
+        namespace: mf.namespace,
+        key: mf.key,
+        value,
+        type: mf.type,
+        ownerId: shopGid,
+      });
+    } catch (error) {
+      logger.warn("Failed to process shop metafield line", {
+        error: String(error),
+      });
+    }
+  }
+
+  // Batch in chunks of 25
+  const chunks = chunkArray(allMetafields, 25);
+  logger.info(
+    `Setting ${allMetafields.length} shop metafields in ${chunks.length} batches`
+  );
+
+  for (const chunk of chunks) {
+    stats.total += chunk.length;
+
+    try {
+      const result = await client.request({
+        query: METAFIELDS_SET,
+        variables: {
+          metafields: chunk.map((mf) => ({
+            namespace: mf.namespace,
+            key: mf.key,
+            value: mf.value,
+            type: mf.type,
+            ownerId: mf.ownerId,
+          })),
+        },
+      });
+
+      if (!result.ok) {
+        stats.failed += chunk.length;
+        stats.errors.push({ error: result.error.message });
+        continue;
+      }
+
+      const response = result.data.data?.metafieldsSet;
+      if (response?.userErrors && response.userErrors.length > 0) {
+        stats.failed += response.userErrors.length;
+        response.userErrors.forEach((e: any) => {
+          stats.errors.push({ error: e.message });
+        });
+      }
+
+      stats.created += chunk.length - (response?.userErrors?.length || 0);
+    } catch (error) {
+      stats.failed += chunk.length;
+      stats.errors.push({ error: String(error) });
+      logger.warn("Shop metafields batch exception", { error: String(error) });
+    }
+  }
+
+  logger.info(
+    `✓ Shop metafields: ${stats.created} created, ${stats.failed} failed`
+  );
   return ok(stats);
 }
 
@@ -905,7 +1047,9 @@ export async function applyPages(
         const response = result.data.data?.pageUpdate;
         if (response?.userErrors && response.userErrors.length > 0) {
           stats.failed++;
-          const errorMsg = response.userErrors.map((e: any) => e.message).join(", ");
+          const errorMsg = response.userErrors
+            .map((e: any) => e.message)
+            .join(", ");
           stats.errors.push({ handle: page.handle, error: errorMsg });
           logger.warn(`Page update user errors for ${page.handle}`, {
             errors: response.userErrors,
@@ -943,7 +1087,9 @@ export async function applyPages(
         const response = result.data.data?.pageCreate;
         if (response?.userErrors && response.userErrors.length > 0) {
           stats.failed++;
-          const errorMsg = response.userErrors.map((e: any) => e.message).join(", ");
+          const errorMsg = response.userErrors
+            .map((e: any) => e.message)
+            .join(", ");
           stats.errors.push({ handle: page.handle, error: errorMsg });
           logger.warn(`Page create user errors for ${page.handle}`, {
             errors: response.userErrors,
@@ -952,12 +1098,12 @@ export async function applyPages(
         }
 
         stats.created++;
-        
+
         // Add newly created page to index for subsequent operations
         if (response?.page?.id) {
           index.pages.set(page.handle, response.page.id);
         }
-        
+
         logger.debug(`✓ Created page: ${page.handle}`);
       }
     } catch (error) {
@@ -968,7 +1114,9 @@ export async function applyPages(
   }
 
   logger.info(
-    `✓ Applied ${stats.created + stats.updated} pages (${stats.created} created, ${stats.updated} updated, ${stats.failed} failed)`
+    `✓ Applied ${stats.created + stats.updated} pages (${
+      stats.created
+    } created, ${stats.updated} updated, ${stats.failed} failed)`
   );
   return ok(stats);
 }
@@ -989,7 +1137,12 @@ export async function applyPages(
 export async function applyAllData(
   client: GraphQLClient,
   inputDir: string
-): Promise<Result<{ metaobjects: ApplyStats; pages: ApplyStats; metafields: ApplyStats }, Error>> {
+): Promise<
+  Result<
+    { metaobjects: ApplyStats; pages: ApplyStats; metafields: ApplyStats },
+    Error
+  >
+> {
   logger.info("=== Starting Data Apply ===");
 
   // Step 1: Build destination index
@@ -1071,6 +1224,21 @@ export async function applyAllData(
     aggregateMetafields.errors.push(...stats.errors);
   }
 
+  // Shop metafields
+  const shopMetafieldsFile = path.join(inputDir, "shop-metafields.jsonl");
+  const shopMfResult = await applyShopMetafields(
+    client,
+    shopMetafieldsFile,
+    finalIndex
+  );
+  if (shopMfResult.ok) {
+    const stats = shopMfResult.data;
+    aggregateMetafields.total += stats.total;
+    aggregateMetafields.created += stats.created;
+    aggregateMetafields.failed += stats.failed;
+    aggregateMetafields.errors.push(...stats.errors);
+  }
+
   logger.info("=== Data Apply Complete ===", {
     metaobjects: {
       total: metaobjectsResult.data.total,
@@ -1092,14 +1260,16 @@ export async function applyAllData(
 
   return ok({
     metaobjects: metaobjectsResult.data,
-    pages: pagesResult.ok ? pagesResult.data : {
-      total: 0,
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      failed: 0,
-      errors: [],
-    },
+    pages: pagesResult.ok
+      ? pagesResult.data
+      : {
+          total: 0,
+          created: 0,
+          updated: 0,
+          skipped: 0,
+          failed: 0,
+          errors: [],
+        },
     metafields: aggregateMetafields,
   });
 }

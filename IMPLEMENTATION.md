@@ -70,21 +70,23 @@
 
 1. **Migration (Data Dump/Apply)** (`packages/core/src/migration/`) ✨
 
-   - ✅ `dump.ts` - Export all custom data (664 lines):
+   - ✅ `dump.ts` - Export all custom data (707 lines): ✨ **UPDATED**
 
      - Bulk export metaobjects (all types, auto-discovered)
      - Bulk export products with variants and metafields
      - Bulk export collections with metafields
      - Bulk export pages with content and metafields
+     - **Bulk export shop-level metafields** ✨ **NEW**
      - Natural key preservation for all references
      - Streaming JSONL output (memory-efficient)
      - Error resilient parsing
 
-   - ✅ `apply.ts` - Import all custom data (965 lines):
+   - ✅ `apply.ts` - Import all custom data (1225 lines): ✨ **UPDATED**
      - Build destination index (handles → GIDs)
      - Apply metaobjects with reference remapping
      - Apply pages (create/update content: title, body, handle)
      - Apply metafields to products/variants/collections/pages
+     - **Apply shop-level metafields with GID query** ✨ **NEW**
      - Three-phase index rebuilding (initial → +metaobjects → +pages → metafields)
      - Batch processing (25 metafields per batch)
      - Idempotent upsert operations
@@ -170,7 +172,8 @@
 - ✅ `PAGE_CONTENT_IMPLEMENTATION.md` - Page content migration summary
 - ✅ `VARIANT_MAPPING_IMPLEMENTATION.md` - Variant indexing implementation summary
 - ✅ `MENUS_IMPLEMENTATION.md` - Menus dump/apply implementation guide
-- ✅ `REDIRECTS_IMPLEMENTATION.md` - Redirects dump/apply implementation guide ✨ **NEW**
+- ✅ `REDIRECTS_IMPLEMENTATION.md` - Redirects dump/apply implementation guide
+- ✅ `DIFF_IMPLEMENTATION.md` - Diff commands implementation guide ✨ **NEW**
 - ✅ `.env.example` - Environment template
 - ✅ `.gitignore` - Proper exclusions (with separate data/ folder for dumps)
 - ✅ Inline code comments explaining Shopify-specific behavior
@@ -192,10 +195,12 @@
    - **Note**: Requires OnlineStoreAccessScope, different GraphQL schema
    - **Complexity**: Higher than pages due to blog → article relationship
 
-2. **Shop-level Metafields**
+2. ~~**Shop-level Metafields**~~ ✅ **COMPLETED**
 
-   - 🔲 Dump and apply shop metafields
-   - **Pattern**: Similar to resource metafields but simpler (no ownership complexity)
+   - ✅ Dump and apply shop metafields
+   - ✅ Query shop GID directly (no handle mapping needed)
+   - ✅ Integrated into `data:dump` and `data:apply`
+   - **File**: `shop-metafields.jsonl`
 
 3. **Progress Tracking**
 
@@ -301,7 +306,8 @@ After running `data:dump -o ./dumps`:
 ├── metaobjects-faq.jsonl
 ├── products.jsonl
 ├── collections.jsonl
-└── pages.jsonl
+├── pages.jsonl
+└── shop-metafields.jsonl         ✨ NEW
 ```
 
 Each JSONL file contains one JSON object per line for memory-efficient streaming.
@@ -456,11 +462,11 @@ Shopify-aware throttling:
 - ✅ Bulk operations (100%)
 - ✅ Mapping system (100%)
 - ✅ Definitions dump/apply (100%)
-- ✅ Data dump (100%)
-- ✅ Data apply (100%)
+- ✅ Data dump (100%) - includes shop metafields ✨
+- ✅ Data apply (100%) - includes shop metafields ✨
 - ✅ Menus dump/apply (100%)
 - ✅ Redirects dump/apply (100%)
-- ✅ Diff commands (100%) ✨ **Complete!**
+- ✅ Diff commands (100%)
 - ✅ CLI commands (100%)
 - ✅ Documentation (100%)
 

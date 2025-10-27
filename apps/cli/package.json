@@ -1,0 +1,25 @@
+{
+  "name": "@shopify-duplicator/cli",
+  "version": "1.0.0",
+  "description": "CLI for Shopify store duplication",
+  "type": "module",
+  "bin": {
+    "shopify-duplicator": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "dev": "tsx src/index.ts",
+    "watch": "tsc --watch"
+  },
+  "dependencies": {
+    "@shopify-duplicator/core": "workspace:*",
+    "commander": "^11.1.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

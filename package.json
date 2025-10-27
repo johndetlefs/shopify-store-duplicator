@@ -1,0 +1,33 @@
+{
+  "name": "shopify-store-duplicator",
+  "version": "1.0.0",
+  "description": "Programmatically duplicate Shopify store custom data and content",
+  "type": "module",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "clean": "npm run clean --workspaces",
+    "dev": "npm run dev -w @shopify-duplicator/cli",
+    "test": "npm test --workspaces"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.3"
+  },
+  "keywords": [
+    "shopify",
+    "migration",
+    "graphql",
+    "metaobjects",
+    "metafields"
+  ],
+  "author": "",
+  "license": "MIT"
+}

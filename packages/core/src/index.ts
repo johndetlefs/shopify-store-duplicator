@@ -29,3 +29,7 @@ export * from "./migration/apply.js";
 
 // Files
 export * from "./files/apply.js";
+
+// Menus
+export * from "./menus/dump.js";
+export * from "./menus/apply.js";

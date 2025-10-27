@@ -33,6 +33,8 @@ import {
   applyCollectionMetafields,
   applyPageMetafields,
   buildDestinationIndex,
+  dumpMenus,
+  applyMenus,
   logger,
   type GraphQLClientConfig,
 } from "@shopify-duplicator/core";
@@ -398,19 +400,102 @@ program
 program
   .command("menus:dump")
   .description("Dump menus from source store")
-  .option("-o, --output <file>", "Output file")
+  .option("-o, --output <file>", "Output file", "./dumps/menus.json")
   .action(async (options) => {
-    logger.warn("menus:dump not yet implemented");
-    process.exit(1);
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.srcShop || !globalOpts.srcToken) {
+      logger.error(
+        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.srcShop,
+      accessToken: globalOpts.srcToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    logger.info(`Dumping menus to ${options.output}`);
+
+    const result = await dumpMenus(client, options.output);
+
+    if (!result.ok) {
+      logger.error("Menus dump failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    logger.info("✓ Menus dump complete");
   });
 
 program
   .command("menus:apply")
   .description("Apply menus to destination store")
-  .option("-f, --file <file>", "Input file")
+  .option("-f, --file <file>", "Input file", "./dumps/menus.json")
   .action(async (options) => {
-    logger.warn("menus:apply not yet implemented");
-    process.exit(1);
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.dstShop || !globalOpts.dstToken) {
+      logger.error(
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.dstShop,
+      accessToken: globalOpts.dstToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    if (globalOpts.dryRun) {
+      logger.info("[DRY RUN] Would apply menus from:", options.file);
+      return;
+    }
+
+    // Build index for URL remapping
+    logger.info("Building destination index for menu URL remapping...");
+    const index = await buildDestinationIndex(client);
+
+    logger.info(`Applying menus from ${options.file}`);
+
+    const result = await applyMenus(
+      client,
+      options.file,
+      index,
+      globalOpts.dstShop
+    );
+
+    if (!result.ok) {
+      logger.error("Menus apply failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    logger.info("✓ Menus apply complete", {
+      total: result.data.total,
+      created: result.data.created,
+      updated: result.data.updated,
+      failed: result.data.failed,
+    });
+
+    // Report errors
+    if (result.data.errors.length > 0) {
+      logger.warn("Menu errors:", result.data.errors.slice(0, 10));
+    }
+
+    if (result.data.failed > 0) {
+      logger.warn(`${result.data.failed} menus failed to apply`);
+      process.exit(1);
+    }
   });
 
 /**

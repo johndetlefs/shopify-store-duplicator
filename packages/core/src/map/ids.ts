@@ -13,6 +13,7 @@ import { logger } from "../utils/logger.js";
 import { type GraphQLClient } from "../graphql/client.js";
 import {
   PRODUCTS_HANDLES_QUERY,
+  PRODUCTS_WITH_VARIANTS_QUERY,
   COLLECTIONS_HANDLES_QUERY,
   PAGES_HANDLES_QUERY,
   METAOBJECTS_HANDLES_QUERY,
@@ -59,6 +60,42 @@ export async function buildDestinationIndex(
   }
   logger.debug(`Indexed ${index.products.size} products`);
 
+  // Index variants (requires separate query with variant data)
+  logger.debug("Indexing variants");
+  let variantCount = 0;
+  for await (const product of client.paginate(
+    PRODUCTS_WITH_VARIANTS_QUERY,
+    {},
+    {
+      getEdges: (data) => data.products.edges,
+      getPageInfo: (data) => data.products.pageInfo,
+    }
+  )) {
+    if (!product.handle || !product.variants?.edges) continue;
+
+    for (const variantEdge of product.variants.edges) {
+      const variant = variantEdge.node;
+      if (!variant.id) continue;
+
+      // Primary key: {productHandle}:{sku}
+      if (variant.sku) {
+        const key = `${product.handle}:${variant.sku}`;
+        index.variants.set(key, variant.id);
+        variantCount++;
+      }
+
+      // Fallback key: {productHandle}:pos{position}
+      if (variant.position !== undefined) {
+        const fallbackKey = `${product.handle}:pos${variant.position}`;
+        // Only set if not already set by SKU
+        if (!index.variants.has(fallbackKey)) {
+          index.variants.set(fallbackKey, variant.id);
+        }
+      }
+    }
+  }
+  logger.debug(`Indexed ${variantCount} variants`);
+
   // Index collections
   logger.debug("Indexing collections");
   for await (const collection of client.paginate(
@@ -93,6 +130,7 @@ export async function buildDestinationIndex(
 
   logger.info("Destination index built", {
     products: index.products.size,
+    variants: index.variants.size,
     collections: index.collections.size,
     pages: index.pages.size,
   });

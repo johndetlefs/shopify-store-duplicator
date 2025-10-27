@@ -608,6 +608,50 @@ export const MENUS_QUERY = `
   }
 `;
 
+export const MENU_CREATE = `
+  mutation menuCreate($menu: MenuCreateInput!) {
+    menuCreate(menu: $menu) {
+      menu {
+        id
+        handle
+        title
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+export const MENU_UPDATE = `
+  mutation menuUpdate($id: ID!, $menu: MenuInput!) {
+    menuUpdate(id: $id, menu: $menu) {
+      menu {
+        id
+        handle
+        title
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+export const MENU_DELETE = `
+  mutation menuDelete($id: ID!) {
+    menuDelete(id: $id) {
+      deletedMenuId
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
 /**
  * Redirects
  */
@@ -652,6 +696,33 @@ export const PRODUCTS_HANDLES_QUERY = `
         node {
           id
           handle
+        }
+        cursor
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`;
+
+export const PRODUCTS_WITH_VARIANTS_QUERY = `
+  query productsWithVariants($first: Int!, $after: String) {
+    products(first: $first, after: $after) {
+      edges {
+        node {
+          id
+          handle
+          variants(first: 100) {
+            edges {
+              node {
+                id
+                sku
+                position
+              }
+            }
+          }
         }
         cursor
       }

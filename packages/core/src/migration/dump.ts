@@ -24,6 +24,8 @@ import {
   COLLECTIONS_BULK,
   PAGES_BULK,
   SHOP_BULK,
+  BLOGS_BULK,
+  ARTICLES_BULK,
   METAOBJECT_DEFINITIONS_QUERY,
 } from "../graphql/queries.js";
 import { GraphQLClient } from "../graphql/client.js";
@@ -108,6 +110,24 @@ interface PageNode {
   title: string;
   body?: string;
   bodySummary?: string;
+  metafields?: MetafieldEdge[];
+}
+
+interface BlogNode {
+  id: string;
+  handle: string;
+  title: string;
+  metafields?: MetafieldEdge[];
+}
+
+interface ArticleNode {
+  id: string;
+  handle: string;
+  title: string;
+  contentHtml?: string;
+  blog: {
+    handle: string;
+  };
   metafields?: MetafieldEdge[];
 }
 
@@ -199,6 +219,22 @@ interface DumpedPage {
   title: string;
   body?: string;
   bodySummary?: string;
+  metafields: DumpedMetafield[];
+}
+
+interface DumpedBlog {
+  id: string;
+  handle: string;
+  title: string;
+  metafields: DumpedMetafield[];
+}
+
+interface DumpedArticle {
+  id: string;
+  handle: string;
+  title: string;
+  contentHtml?: string;
+  blogHandle: string;
   metafields: DumpedMetafield[];
 }
 
@@ -679,7 +715,103 @@ export async function dumpShopMetafields(
 }
 
 /**
- * Dump all data: metaobjects, products, collections, pages
+ * Dump all blogs with metafields
+ */
+export async function dumpBlogs(
+  client: GraphQLClient,
+  outputDir: string
+): Promise<Result<void, Error>> {
+  logger.info("=== Dumping Blogs ===");
+
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  const result = await runBulkQueryAndDownload(client, BLOGS_BULK);
+  if (!result.ok) {
+    logger.error("Failed to dump blogs:", result.error);
+    return { ok: false, error: result.error };
+  }
+
+  // Parse JSONL stream
+  const transformed: DumpedBlog[] = [];
+
+  for await (const entry of result.data) {
+    try {
+      const blog = entry as BlogNode;
+      const dumped: DumpedBlog = {
+        id: blog.id,
+        handle: blog.handle,
+        title: blog.title,
+        metafields:
+          blog.metafields?.map((e) => transformMetafield(e.node)) || [],
+      };
+      transformed.push(dumped);
+    } catch (err) {
+      logger.warn("Failed to parse blog entry:", { error: String(err) });
+    }
+  }
+
+  // Write to file
+  const outputFile = path.join(outputDir, "blogs.jsonl");
+  const content = transformed.map((obj) => JSON.stringify(obj)).join("\n");
+  fs.writeFileSync(outputFile, content, "utf-8");
+
+  logger.info(`✓ Dumped ${transformed.length} blogs to ${outputFile}`);
+  return { ok: true, data: undefined };
+}
+
+/**
+ * Dump all articles with metafields
+ */
+export async function dumpArticles(
+  client: GraphQLClient,
+  outputDir: string
+): Promise<Result<void, Error>> {
+  logger.info("=== Dumping Articles ===");
+
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  const result = await runBulkQueryAndDownload(client, ARTICLES_BULK);
+  if (!result.ok) {
+    logger.error("Failed to dump articles:", result.error);
+    return { ok: false, error: result.error };
+  }
+
+  // Parse JSONL stream
+  const transformed: DumpedArticle[] = [];
+
+  for await (const entry of result.data) {
+    try {
+      const article = entry as ArticleNode;
+      const dumped: DumpedArticle = {
+        id: article.id,
+        handle: article.handle,
+        title: article.title,
+        contentHtml: article.contentHtml,
+        blogHandle: article.blog.handle,
+        metafields:
+          article.metafields?.map((e) => transformMetafield(e.node)) || [],
+      };
+      transformed.push(dumped);
+    } catch (err) {
+      logger.warn("Failed to parse article entry:", { error: String(err) });
+    }
+  }
+
+  // Write to file
+  const outputFile = path.join(outputDir, "articles.jsonl");
+  const content = transformed.map((obj) => JSON.stringify(obj)).join("\n");
+  fs.writeFileSync(outputFile, content, "utf-8");
+
+  logger.info(`✓ Dumped ${transformed.length} articles to ${outputFile}`);
+  return { ok: true, data: undefined };
+}
+
+/**
+ * Dump all data: metaobjects, products, collections, pages, blogs, articles
  */
 export async function dumpAllData(
   client: GraphQLClient,
@@ -717,6 +849,16 @@ export async function dumpAllData(
   const filesResult = await dumpFiles(client, outputDir);
   if (!filesResult.ok) {
     logger.warn("Files dump failed, continuing...");
+  }
+
+  const blogsResult = await dumpBlogs(client, outputDir);
+  if (!blogsResult.ok) {
+    logger.warn("Blogs dump failed, continuing...");
+  }
+
+  const articlesResult = await dumpArticles(client, outputDir);
+  if (!articlesResult.ok) {
+    logger.warn("Articles dump failed, continuing...");
   }
 
   logger.info("=== Data Dump Complete ===");

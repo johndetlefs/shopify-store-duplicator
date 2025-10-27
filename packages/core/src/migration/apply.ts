@@ -27,6 +27,10 @@ import {
   METAFIELDS_SET,
   PAGE_CREATE,
   PAGE_UPDATE,
+  BLOG_CREATE,
+  BLOG_UPDATE,
+  ARTICLE_CREATE,
+  ARTICLE_UPDATE,
 } from "../graphql/queries.js";
 import { applyFiles, type FileIndex } from "../files/apply.js";
 import { relinkMetaobjects } from "../files/relink.js";
@@ -36,6 +40,8 @@ import {
   gidForProductHandle,
   gidForCollectionHandle,
   gidForPageHandle,
+  gidForBlogHandle,
+  gidForArticle,
   gidForMetaobject,
   gidForVariant,
   type DestinationIndex,
@@ -130,6 +136,25 @@ interface DumpedPage {
   title: string;
   body?: string;
   bodySummary?: string;
+  metafields: DumpedMetafield[];
+}
+
+interface DumpedBlog {
+  id: string;
+  handle: string;
+  title: string;
+  metafields: DumpedMetafield[];
+}
+
+interface DumpedArticle {
+  id: string;
+  handle: string;
+  blogHandle: string;
+  title: string;
+  body?: string;
+  author?: string;
+  tags?: string[];
+  publishedAt?: string;
   metafields: DumpedMetafield[];
 }
 
@@ -1139,6 +1164,333 @@ export async function applyPages(
 }
 
 // ============================================================================
+// Apply Blogs
+// ============================================================================
+
+/**
+ * Apply blogs (create/update blog entries).
+ * Blogs are created or updated by handle.
+ */
+export async function applyBlogs(
+  client: GraphQLClient,
+  inputFile: string,
+  index: DestinationIndex
+): Promise<Result<ApplyStats, Error>> {
+  logger.info("=== Applying Blogs ===");
+
+  const stats: ApplyStats = {
+    total: 0,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+    errors: [],
+  };
+
+  if (!fs.existsSync(inputFile)) {
+    logger.warn(`Blogs dump not found: ${inputFile}`);
+    return ok(stats);
+  }
+
+  const content = fs.readFileSync(inputFile, "utf-8");
+  const lines = content.split("\n").filter((l) => l.trim());
+
+  for (const line of lines) {
+    stats.total++;
+    try {
+      const blog = JSON.parse(line) as DumpedBlog;
+
+      const existingGid = gidForBlogHandle(index, blog.handle);
+
+      if (existingGid) {
+        // Blog exists - update it
+        const result = await client.request({
+          query: BLOG_UPDATE,
+          variables: {
+            id: existingGid,
+            blog: {
+              title: blog.title,
+            },
+          },
+        });
+
+        if (!result.ok) {
+          stats.failed++;
+          stats.errors.push({
+            handle: blog.handle,
+            error: result.error.message,
+          });
+          logger.warn(`Failed to update blog ${blog.handle}`, {
+            error: result.error.message,
+          });
+          continue;
+        }
+
+        const response = result.data.data?.blogUpdate;
+        if (response?.userErrors && response.userErrors.length > 0) {
+          stats.failed++;
+          const errorMsg = response.userErrors
+            .map((e: any) => e.message)
+            .join(", ");
+          stats.errors.push({ handle: blog.handle, error: errorMsg });
+          logger.warn(`Blog update user errors for ${blog.handle}`, {
+            errors: response.userErrors,
+          });
+          continue;
+        }
+
+        stats.updated++;
+        logger.debug(`✓ Updated blog: ${blog.handle}`);
+      } else {
+        // Blog doesn't exist - create it
+        const result = await client.request({
+          query: BLOG_CREATE,
+          variables: {
+            blog: {
+              title: blog.title,
+              handle: blog.handle,
+            },
+          },
+        });
+
+        if (!result.ok) {
+          stats.failed++;
+          stats.errors.push({
+            handle: blog.handle,
+            error: result.error.message,
+          });
+          logger.warn(`Failed to create blog ${blog.handle}`, {
+            error: result.error.message,
+          });
+          continue;
+        }
+
+        const response = result.data.data?.blogCreate;
+        if (response?.userErrors && response.userErrors.length > 0) {
+          stats.failed++;
+          const errorMsg = response.userErrors
+            .map((e: any) => e.message)
+            .join(", ");
+          stats.errors.push({ handle: blog.handle, error: errorMsg });
+          logger.warn(`Blog create user errors for ${blog.handle}`, {
+            errors: response.userErrors,
+          });
+          continue;
+        }
+
+        stats.created++;
+
+        // Add newly created blog to index for subsequent operations
+        if (response?.blog?.id) {
+          index.blogs.set(blog.handle, response.blog.id);
+        }
+
+        logger.debug(`✓ Created blog: ${blog.handle}`);
+      }
+    } catch (error) {
+      stats.failed++;
+      stats.errors.push({ error: String(error) });
+      logger.warn("Failed to process blog line", { error: String(error) });
+    }
+  }
+
+  logger.info(
+    `✓ Applied ${stats.created + stats.updated} blogs (${
+      stats.created
+    } created, ${stats.updated} updated, ${stats.failed} failed)`
+  );
+  return ok(stats);
+}
+
+// ============================================================================
+// Apply Articles
+// ============================================================================
+
+/**
+ * Apply articles (create/update article entries).
+ * Articles belong to blogs and are identified by {blogHandle}:{articleHandle}.
+ */
+export async function applyArticles(
+  client: GraphQLClient,
+  inputFile: string,
+  index: DestinationIndex
+): Promise<Result<ApplyStats, Error>> {
+  logger.info("=== Applying Articles ===");
+
+  const stats: ApplyStats = {
+    total: 0,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+    errors: [],
+  };
+
+  if (!fs.existsSync(inputFile)) {
+    logger.warn(`Articles dump not found: ${inputFile}`);
+    return ok(stats);
+  }
+
+  const content = fs.readFileSync(inputFile, "utf-8");
+  const lines = content.split("\n").filter((l) => l.trim());
+
+  for (const line of lines) {
+    stats.total++;
+    try {
+      const article = JSON.parse(line) as DumpedArticle;
+
+      // Resolve blog GID from blogHandle
+      const blogGid = gidForBlogHandle(index, article.blogHandle);
+      if (!blogGid) {
+        stats.failed++;
+        stats.errors.push({
+          handle: `${article.blogHandle}:${article.handle}`,
+          error: `Blog not found: ${article.blogHandle}`,
+        });
+        logger.warn(
+          `Cannot create article ${article.handle} - blog ${article.blogHandle} not found`
+        );
+        continue;
+      }
+
+      const existingGid = gidForArticle(
+        index,
+        article.blogHandle,
+        article.handle
+      );
+
+      if (existingGid) {
+        // Article exists - update it
+        const result = await client.request({
+          query: ARTICLE_UPDATE,
+          variables: {
+            id: existingGid,
+            article: {
+              title: article.title,
+              body: article.body || "",
+              author: article.author,
+              tags: article.tags || [],
+            },
+          },
+        });
+
+        if (!result.ok) {
+          stats.failed++;
+          stats.errors.push({
+            handle: `${article.blogHandle}:${article.handle}`,
+            error: result.error.message,
+          });
+          logger.warn(
+            `Failed to update article ${article.blogHandle}:${article.handle}`,
+            {
+              error: result.error.message,
+            }
+          );
+          continue;
+        }
+
+        const response = result.data.data?.articleUpdate;
+        if (response?.userErrors && response.userErrors.length > 0) {
+          stats.failed++;
+          const errorMsg = response.userErrors
+            .map((e: any) => e.message)
+            .join(", ");
+          stats.errors.push({
+            handle: `${article.blogHandle}:${article.handle}`,
+            error: errorMsg,
+          });
+          logger.warn(
+            `Article update user errors for ${article.blogHandle}:${article.handle}`,
+            {
+              errors: response.userErrors,
+            }
+          );
+          continue;
+        }
+
+        stats.updated++;
+        logger.debug(
+          `✓ Updated article: ${article.blogHandle}:${article.handle}`
+        );
+      } else {
+        // Article doesn't exist - create it
+        const result = await client.request({
+          query: ARTICLE_CREATE,
+          variables: {
+            article: {
+              blogId: blogGid,
+              title: article.title,
+              handle: article.handle,
+              body: article.body || "",
+              author: article.author,
+              tags: article.tags || [],
+              publishedAt: article.publishedAt,
+            },
+          },
+        });
+
+        if (!result.ok) {
+          stats.failed++;
+          stats.errors.push({
+            handle: `${article.blogHandle}:${article.handle}`,
+            error: result.error.message,
+          });
+          logger.warn(
+            `Failed to create article ${article.blogHandle}:${article.handle}`,
+            {
+              error: result.error.message,
+            }
+          );
+          continue;
+        }
+
+        const response = result.data.data?.articleCreate;
+        if (response?.userErrors && response.userErrors.length > 0) {
+          stats.failed++;
+          const errorMsg = response.userErrors
+            .map((e: any) => e.message)
+            .join(", ");
+          stats.errors.push({
+            handle: `${article.blogHandle}:${article.handle}`,
+            error: errorMsg,
+          });
+          logger.warn(
+            `Article create user errors for ${article.blogHandle}:${article.handle}`,
+            {
+              errors: response.userErrors,
+            }
+          );
+          continue;
+        }
+
+        stats.created++;
+
+        // Add newly created article to index for subsequent operations
+        if (response?.article?.id) {
+          const key = `${article.blogHandle}:${article.handle}`;
+          index.articles.set(key, response.article.id);
+        }
+
+        logger.debug(
+          `✓ Created article: ${article.blogHandle}:${article.handle}`
+        );
+      }
+    } catch (error) {
+      stats.failed++;
+      stats.errors.push({ error: String(error) });
+      logger.warn("Failed to process article line", { error: String(error) });
+    }
+  }
+
+  logger.info(
+    `✓ Applied ${stats.created + stats.updated} articles (${
+      stats.created
+    } created, ${stats.updated} updated, ${stats.failed} failed)`
+  );
+  return ok(stats);
+}
+
+// ============================================================================
 // Main Apply Function
 // ============================================================================
 
@@ -1149,8 +1501,9 @@ export async function applyPages(
  * 1. Build destination index
  * 2. Apply files (upload and build file index for relinking)
  * 3. Apply metaobjects (with remapped refs including files)
- * 4. Apply pages (create/update content)
- * 5. Apply metafields to products, collections, pages, shop
+ * 4. Apply blogs and articles
+ * 5. Apply pages (create/update content)
+ * 6. Apply metafields to products, collections, pages, blogs, articles, shop
  */
 export async function applyAllData(
   client: GraphQLClient,
@@ -1159,6 +1512,8 @@ export async function applyAllData(
   Result<
     {
       metaobjects: ApplyStats;
+      blogs: ApplyStats;
+      articles: ApplyStats;
       pages: ApplyStats;
       metafields: ApplyStats;
       files: { uploaded: number; failed: number };
@@ -1199,10 +1554,38 @@ export async function applyAllData(
 
   // Rebuild index after creating metaobjects to ensure new ones are mapped
   logger.info("Rebuilding index after metaobject creation...");
-  const updatedIndex = await buildDestinationIndex(client);
+  let updatedIndex = await buildDestinationIndex(client);
 
-  // Step 4: Apply pages (create/update content before metafields)
-  logger.info("Step 4: Applying pages...");
+  // Step 4: Apply blogs (before articles)
+  logger.info("Step 4: Applying blogs...");
+  const blogsFile = path.join(inputDir, "blogs.jsonl");
+  const blogsResult = await applyBlogs(client, blogsFile, updatedIndex);
+  if (!blogsResult.ok) {
+    logger.warn("Blogs apply failed, continuing...");
+  }
+
+  // Rebuild index after creating blogs to ensure new blogs are mapped
+  logger.info("Rebuilding index after blog creation...");
+  updatedIndex = await buildDestinationIndex(client);
+
+  // Step 5: Apply articles (after blogs)
+  logger.info("Step 5: Applying articles...");
+  const articlesFile = path.join(inputDir, "articles.jsonl");
+  const articlesResult = await applyArticles(
+    client,
+    articlesFile,
+    updatedIndex
+  );
+  if (!articlesResult.ok) {
+    logger.warn("Articles apply failed, continuing...");
+  }
+
+  // Rebuild index after creating articles to ensure new articles are mapped
+  logger.info("Rebuilding index after article creation...");
+  updatedIndex = await buildDestinationIndex(client);
+
+  // Step 6: Apply pages (create/update content before metafields)
+  logger.info("Step 6: Applying pages...");
   const pagesFile = path.join(inputDir, "pages.jsonl");
   const pagesResult = await applyPages(client, pagesFile, updatedIndex);
   if (!pagesResult.ok) {
@@ -1213,8 +1596,8 @@ export async function applyAllData(
   logger.info("Rebuilding index after page creation...");
   const finalIndex = await buildDestinationIndex(client);
 
-  // Step 5: Apply metafields
-  logger.info("Step 5: Applying metafields...");
+  // Step 7: Apply metafields
+  logger.info("Step 7: Applying metafields...");
 
   const aggregateMetafields: ApplyStats = {
     total: 0,
@@ -1289,6 +1672,18 @@ export async function applyAllData(
       created: metaobjectsResult.data.created,
       failed: metaobjectsResult.data.failed,
     },
+    blogs: {
+      total: blogsResult.ok ? blogsResult.data.total : 0,
+      created: blogsResult.ok ? blogsResult.data.created : 0,
+      updated: blogsResult.ok ? blogsResult.data.updated : 0,
+      failed: blogsResult.ok ? blogsResult.data.failed : 0,
+    },
+    articles: {
+      total: articlesResult.ok ? articlesResult.data.total : 0,
+      created: articlesResult.ok ? articlesResult.data.created : 0,
+      updated: articlesResult.ok ? articlesResult.data.updated : 0,
+      failed: articlesResult.ok ? articlesResult.data.failed : 0,
+    },
     pages: {
       total: pagesResult.ok ? pagesResult.data.total : 0,
       created: pagesResult.ok ? pagesResult.data.created : 0,
@@ -1308,6 +1703,26 @@ export async function applyAllData(
       failed: 0, // TODO: track failed uploads
     },
     metaobjects: metaobjectsResult.data,
+    blogs: blogsResult.ok
+      ? blogsResult.data
+      : {
+          total: 0,
+          created: 0,
+          updated: 0,
+          skipped: 0,
+          failed: 0,
+          errors: [],
+        },
+    articles: articlesResult.ok
+      ? articlesResult.data
+      : {
+          total: 0,
+          created: 0,
+          updated: 0,
+          skipped: 0,
+          failed: 0,
+          errors: [],
+        },
     pages: pagesResult.ok
       ? pagesResult.data
       : {

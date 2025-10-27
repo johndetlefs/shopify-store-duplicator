@@ -16,6 +16,8 @@ import {
   PRODUCTS_WITH_VARIANTS_QUERY,
   COLLECTIONS_HANDLES_QUERY,
   PAGES_HANDLES_QUERY,
+  BLOGS_HANDLES_QUERY,
+  ARTICLES_HANDLES_QUERY,
   METAOBJECTS_HANDLES_QUERY,
 } from "../graphql/queries.js";
 
@@ -23,6 +25,8 @@ export interface DestinationIndex {
   products: Map<string, string>; // handle → GID
   collections: Map<string, string>; // handle → GID
   pages: Map<string, string>; // handle → GID
+  blogs: Map<string, string>; // handle → GID
+  articles: Map<string, string>; // {blogHandle}:{articleHandle} → GID
   metaobjects: Map<string, string>; // {type}:{handle} → GID
   variants: Map<string, string>; // {productHandle}:{sku|position} → GID
 }
@@ -40,6 +44,8 @@ export async function buildDestinationIndex(
     products: new Map(),
     collections: new Map(),
     pages: new Map(),
+    blogs: new Map(),
+    articles: new Map(),
     metaobjects: new Map(),
     variants: new Map(),
   };
@@ -128,11 +134,46 @@ export async function buildDestinationIndex(
   }
   logger.debug(`Indexed ${index.pages.size} pages`);
 
+  // Index blogs
+  logger.debug("Indexing blogs");
+  for await (const blog of client.paginate(
+    BLOGS_HANDLES_QUERY,
+    {},
+    {
+      getEdges: (data) => data.blogs.edges,
+      getPageInfo: (data) => data.blogs.pageInfo,
+    }
+  )) {
+    if (blog.handle) {
+      index.blogs.set(blog.handle, blog.id);
+    }
+  }
+  logger.debug(`Indexed ${index.blogs.size} blogs`);
+
+  // Index articles
+  logger.debug("Indexing articles");
+  for await (const article of client.paginate(
+    ARTICLES_HANDLES_QUERY,
+    {},
+    {
+      getEdges: (data) => data.articles.edges,
+      getPageInfo: (data) => data.articles.pageInfo,
+    }
+  )) {
+    if (article.handle && article.blog?.handle) {
+      const key = `${article.blog.handle}:${article.handle}`;
+      index.articles.set(key, article.id);
+    }
+  }
+  logger.debug(`Indexed ${index.articles.size} articles`);
+
   logger.info("Destination index built", {
     products: index.products.size,
     variants: index.variants.size,
     collections: index.collections.size,
     pages: index.pages.size,
+    blogs: index.blogs.size,
+    articles: index.articles.size,
   });
 
   return index;
@@ -197,6 +238,28 @@ export function gidForPageHandle(
   handle: string
 ): string | undefined {
   return index.pages.get(handle);
+}
+
+/**
+ * Resolve a blog handle to a destination GID.
+ */
+export function gidForBlogHandle(
+  index: DestinationIndex,
+  handle: string
+): string | undefined {
+  return index.blogs.get(handle);
+}
+
+/**
+ * Resolve an article by blog handle + article handle to a destination GID.
+ */
+export function gidForArticle(
+  index: DestinationIndex,
+  blogHandle: string,
+  articleHandle: string
+): string | undefined {
+  const key = `${blogHandle}:${articleHandle}`;
+  return index.articles.get(key);
 }
 
 /**

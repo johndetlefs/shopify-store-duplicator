@@ -340,6 +340,18 @@ program
         created: result.data.metaobjects.created,
         failed: result.data.metaobjects.failed,
       },
+      blogs: {
+        total: result.data.blogs.total,
+        created: result.data.blogs.created,
+        updated: result.data.blogs.updated,
+        failed: result.data.blogs.failed,
+      },
+      articles: {
+        total: result.data.articles.total,
+        created: result.data.articles.created,
+        updated: result.data.articles.updated,
+        failed: result.data.articles.failed,
+      },
       pages: {
         total: result.data.pages.total,
         created: result.data.pages.created,
@@ -360,6 +372,12 @@ program
         result.data.metaobjects.errors.slice(0, 10)
       );
     }
+    if (result.data.blogs.errors.length > 0) {
+      logger.warn("Blog errors:", result.data.blogs.errors.slice(0, 10));
+    }
+    if (result.data.articles.errors.length > 0) {
+      logger.warn("Article errors:", result.data.articles.errors.slice(0, 10));
+    }
     if (result.data.pages.errors.length > 0) {
       logger.warn("Page errors:", result.data.pages.errors.slice(0, 10));
     }
@@ -372,6 +390,8 @@ program
 
     const totalFailed =
       result.data.metaobjects.failed +
+      result.data.blogs.failed +
+      result.data.articles.failed +
       result.data.pages.failed +
       result.data.metafields.failed;
     if (totalFailed > 0) {

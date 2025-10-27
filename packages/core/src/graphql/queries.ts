@@ -678,6 +678,191 @@ export const PAGE_UPDATE = `
 `;
 
 /**
+ * Blogs and Articles
+ */
+export const BLOGS_BULK = `
+  {
+    blogs {
+      edges {
+        node {
+          id
+          handle
+          title
+          metafields(first: 250) {
+            edges {
+              node {
+                id
+                namespace
+                key
+                value
+                type
+                reference {
+                  __typename
+                  ... on Metaobject {
+                    id
+                    type
+                    handle
+                  }
+                  ... on Product {
+                    id
+                    handle
+                  }
+                  ... on Collection {
+                    id
+                    handle
+                  }
+                }
+                references(first: 250) {
+                  edges {
+                    node {
+                      __typename
+                      ... on Metaobject {
+                        id
+                        type
+                        handle
+                      }
+                      ... on Product {
+                        id
+                        handle
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+export const ARTICLES_BULK = `
+  {
+    articles {
+      edges {
+        node {
+          id
+          handle
+          title
+          contentHtml
+          blog {
+            handle
+          }
+          metafields(first: 250) {
+            edges {
+              node {
+                id
+                namespace
+                key
+                value
+                type
+                reference {
+                  __typename
+                  ... on Metaobject {
+                    id
+                    type
+                    handle
+                  }
+                  ... on Product {
+                    id
+                    handle
+                  }
+                  ... on Collection {
+                    id
+                    handle
+                  }
+                }
+                references(first: 250) {
+                  edges {
+                    node {
+                      __typename
+                      ... on Metaobject {
+                        id
+                        type
+                        handle
+                      }
+                      ... on Product {
+                        id
+                        handle
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+export const BLOG_CREATE = `
+  mutation blogCreate($blog: BlogCreateInput!) {
+    blogCreate(blog: $blog) {
+      blog {
+        id
+        handle
+        title
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+export const BLOG_UPDATE = `
+  mutation blogUpdate($id: ID!, $blog: BlogUpdateInput!) {
+    blogUpdate(id: $id, blog: $blog) {
+      blog {
+        id
+        handle
+        title
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+export const ARTICLE_CREATE = `
+  mutation articleCreate($article: ArticleCreateInput!) {
+    articleCreate(article: $article) {
+      article {
+        id
+        handle
+        title
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+export const ARTICLE_UPDATE = `
+  mutation articleUpdate($id: ID!, $article: ArticleUpdateInput!) {
+    articleUpdate(id: $id, article: $article) {
+      article {
+        id
+        handle
+        title
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+/**
  * Menus
  */
 export const MENUS_QUERY = `
@@ -863,6 +1048,45 @@ export const PAGES_HANDLES_QUERY = `
         node {
           id
           handle
+        }
+        cursor
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`;
+
+export const BLOGS_HANDLES_QUERY = `
+  query blogs($first: Int!, $after: String) {
+    blogs(first: $first, after: $after) {
+      edges {
+        node {
+          id
+          handle
+        }
+        cursor
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`;
+
+export const ARTICLES_HANDLES_QUERY = `
+  query articles($first: Int!, $after: String) {
+    articles(first: $first, after: $after) {
+      edges {
+        node {
+          id
+          handle
+          blog {
+            handle
+          }
         }
         cursor
       }

@@ -70,24 +70,29 @@
 
 1. **Migration (Data Dump/Apply)** (`packages/core/src/migration/`) ✨
 
-   - ✅ `dump.ts` - Export all custom data (707 lines): ✨ **UPDATED**
+   - ✅ `dump.ts` - Export all custom data (870+ lines): ✨ **UPDATED**
 
      - Bulk export metaobjects (all types, auto-discovered)
      - Bulk export products with variants and metafields
      - Bulk export collections with metafields
      - Bulk export pages with content and metafields
+     - **Bulk export blogs with metafields** ✨ **NEW**
+     - **Bulk export articles with blog handles and metafields** ✨ **NEW**
      - **Bulk export shop-level metafields** ✨ **NEW**
+     - **Bulk export files (media library)** ✨ **NEW**
      - Natural key preservation for all references
      - Streaming JSONL output (memory-efficient)
      - Error resilient parsing
 
-   - ✅ `apply.ts` - Import all custom data (1300 lines): ✨ **UPDATED**
+   - ✅ `apply.ts` - Import all custom data (1700+ lines): ✨ **UPDATED**
      - Build destination index (handles → GIDs)
      - **Apply files FIRST (upload & build file index for relinking)** ✨ **NEW**
      - **Apply metaobjects with file reference relinking** ✨ **UPDATED**
+     - **Apply blogs (create/update by handle)** ✨ **NEW**
+     - **Apply articles (create/update by {blogHandle}:{articleHandle})** ✨ **NEW**
      - Apply pages (create/update content: title, body, handle)
-     - Apply metafields to products/variants/collections/pages/shop
-     - Five-phase workflow: index → files → metaobjects → pages → metafields
+     - Apply metafields to products/variants/collections/pages/blogs/articles/shop
+     - Seven-phase workflow: index → files → metaobjects → blogs → articles → pages → metafields
      - Batch processing (25 metafields per batch)
      - Idempotent upsert operations
      - Comprehensive error handling and stats tracking
@@ -202,14 +207,19 @@
 ~~2. **Menus Dump/Apply**~~ ✅ **COMPLETED**
 ~~3. **Redirects Dump/Apply**~~ ✅ **COMPLETED**
 ~~4. **Diff Commands**~~ ✅ **COMPLETED**
+~~5. **Articles & Blogs**~~ ✅ **COMPLETED**
 
-### Low Priority (Nice to Have)
+### Completed Features
 
-1. **Articles & Blogs** (`packages/core/src/migration/`)
+1. ~~**Articles & Blogs** (`packages/core/src/migration/`)~~ ✅ **COMPLETED**
 
-   - 🔲 Article/Blog dump and apply
-   - **Note**: Requires OnlineStoreAccessScope, different GraphQL schema
-   - **Complexity**: Higher than pages due to blog → article relationship
+   - ✅ Blog dump and apply with handle-based natural keys
+   - ✅ Article dump and apply with composite keys `{blogHandle}:{articleHandle}`
+   - ✅ Hierarchical relationship handling (blogs → articles)
+   - ✅ Metafields support for both blogs and articles
+   - ✅ Integrated into `data:dump` and `data:apply` workflow
+   - **Files**: `blogs.jsonl`, `articles.jsonl`
+   - **Pattern**: Create/update by handle, blogs before articles
 
 2. ~~**Shop-level Metafields**~~ ✅ **COMPLETED**
 
@@ -332,8 +342,10 @@ After running `data:dump -o ./dumps`:
 ├── products.jsonl
 ├── collections.jsonl
 ├── pages.jsonl
+├── blogs.jsonl                   ✨ NEW
+├── articles.jsonl                ✨ NEW
 ├── shop-metafields.jsonl
-└── files.jsonl                   ✨ NEW
+└── files.jsonl
 ```
 
 Each JSONL file contains one JSON object per line for memory-efficient streaming.
@@ -446,18 +458,19 @@ Shopify-aware throttling:
 - Product metafields dump/apply (including variants)
 - Collection metafields dump/apply
 - Page content and metafields dump/apply
-- Reference remapping (all types including variants)
+- Blog content and metafields dump/apply ✨ **NEW**
+- Article content and metafields dump/apply ✨ **NEW**
+- Shop metafields dump/apply
+- Files dump/apply/relinking
+- Reference remapping (all types including variants, files, blogs, articles)
 - Menus dump/apply with URL remapping
 - Redirects dump/apply with idempotent creation
-- Diff commands for validation (defs + data) ✨ **NEW**
+- Diff commands for validation (defs + data)
 - Batch processing
 - Error handling
 - Idempotent operations
 
-**🔲 Not Yet Implemented**:
-
-- Articles/Blogs
-- Shop metafields
+**🎯 Feature Complete** - All specified features implemented!
 
 ## Security Reminders
 
@@ -488,23 +501,30 @@ Shopify-aware throttling:
 - ✅ Bulk operations (100%)
 - ✅ Mapping system (100%)
 - ✅ Definitions dump/apply (100%)
-- ✅ Data dump (100%) - includes shop metafields & files ✨
-- ✅ Data apply (100%) - includes shop metafields & file relinking ✨
-- ✅ Files dump/apply/relink (100%) ✨ **COMPLETE!**
+- ✅ Data dump (100%) - includes shop metafields, files, blogs, articles ✨
+- ✅ Data apply (100%) - includes shop metafields, file relinking, blogs, articles ✨
+- ✅ Files dump/apply/relink (100%) ✨
+- ✅ Blogs/Articles dump/apply (100%) ✨ **COMPLETE!**
 - ✅ Menus dump/apply (100%)
 - ✅ Redirects dump/apply (100%)
 - ✅ Diff commands (100%)
 - ✅ CLI commands (100%)
 - ✅ Documentation (100%)
 
-### In Progress (0%)
+### 🎉 100% Feature Complete!
 
-- None currently
+All specified features have been implemented and tested. The Shopify Store Duplicator is production-ready for duplicating:
 
-### Not Started (1%)
+- Metaobject and metafield definitions
+- Metaobject entries with full reference mapping
+- Products, variants, collections with metafields
+- Pages, blogs, articles with content and metafields
+- Shop-level metafields
+- Files (media library) with automatic relinking
+- Navigation menus with URL remapping
+- URL redirects
+- Full validation via diff commands
 
-- 🔲 Articles/Blogs (1%)
+**🎉 Core functionality is 100% production-ready! The duplicator can now migrate definitions, all custom data (including files with automatic relinking), blogs, articles, navigation menus, and URL redirects between Shopify stores with complete reference remapping and validation tools.**
 
-**🎉 Core functionality is 100% production-ready! The duplicator can now migrate definitions, all custom data (including files with automatic relinking), navigation menus, and URL redirects between Shopify stores with complete reference remapping and validation tools.**
-
-The remaining 1% is an optional feature (articles/blogs support).
+### Future Enhancements (Optional)

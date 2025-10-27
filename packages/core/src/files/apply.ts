@@ -158,11 +158,8 @@ async function stagedUpload(
     return res;
   });
 
-  if (!sourceResponse.ok) {
-    return err(sourceResponse.error);
-  }
-
-  const fileData = await sourceResponse.data.arrayBuffer();
+  // withBackoff returns the Response directly (not a Result)
+  const fileData = await sourceResponse.arrayBuffer();
 
   // Step 3: Upload to staged target
   const formData = new FormData();
@@ -185,10 +182,7 @@ async function stagedUpload(
     return res;
   });
 
-  if (!uploadResponse.ok) {
-    return err(uploadResponse.error);
-  }
-
+  // withBackoff returns the Response directly (not a Result)
   // Step 4: Create file from staged upload
   const fileResult = await client.request({
     query: FILE_CREATE,

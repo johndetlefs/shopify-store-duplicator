@@ -43,8 +43,8 @@ export function redactObject<T extends Record<string, any>>(
     "apiKey",
     "accessToken",
   ]
-): T {
-  const redacted = { ...obj };
+): Record<string, any> {
+  const redacted: Record<string, any> = { ...obj };
 
   for (const key of Object.keys(redacted)) {
     const lowerKey = key.toLowerCase();

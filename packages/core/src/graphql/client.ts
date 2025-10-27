@@ -75,7 +75,7 @@ export class GraphQLClient {
         });
 
         const duration = Date.now() - startTime;
-        const responseData: GraphQLResponse<T> = await response.json();
+        const responseData = (await response.json()) as GraphQLResponse<T>;
 
         // Log cost information for monitoring
         if (responseData.extensions?.cost) {
@@ -113,16 +113,16 @@ export class GraphQLClient {
         // Handle GraphQL errors
         if (responseData.errors && responseData.errors.length > 0) {
           const firstError = responseData.errors[0];
-          const error = new ShopifyApiError(
-            firstError.message,
-            response.status,
-            responseData
-          );
 
           // Check for throttle errors (code 430)
-          if (firstError.extensions?.code === "THROTTLED") {
-            error.status = 430;
-          }
+          const status =
+            firstError.extensions?.code === "THROTTLED" ? 430 : response.status;
+
+          const error = new ShopifyApiError(
+            firstError.message,
+            status,
+            responseData
+          );
 
           return err(error);
         }

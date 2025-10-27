@@ -180,11 +180,8 @@ export async function* downloadBulkJsonl(url: string): AsyncIterable<any> {
     return res;
   });
 
-  if (!response.ok) {
-    throw response.error;
-  }
-
-  const body = response.data.body;
+  // withBackoff returns the Response directly (not a Result)
+  const body = response.body;
   if (!body) {
     throw new ShopifyApiError("No response body");
   }

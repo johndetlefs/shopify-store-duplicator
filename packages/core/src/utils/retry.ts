@@ -125,7 +125,7 @@ export class RateLimiter {
   private async acquireSlot(): Promise<void> {
     // Wait for available slot
     while (this.running >= this.maxConcurrent) {
-      await new Promise((resolve) => this.queue.push(resolve));
+      await new Promise<void>((resolve) => this.queue.push(() => resolve()));
     }
 
     // Enforce minimum interval between operations

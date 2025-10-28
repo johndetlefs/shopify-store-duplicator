@@ -75,17 +75,15 @@ export const METAOBJECT_DEFINITIONS_QUERY = `
             renderable {
               enabled
               data {
-                metaobjectId
-                metafieldKeys
+                metaTitleKey
+                metaDescriptionKey
               }
             }
             onlineStore {
               enabled
               data {
-                aliasMapping {
-                  key
-                  value
-                }
+                urlHandle
+                canCreateRedirects
               }
             }
           }
@@ -155,9 +153,7 @@ export const METAFIELD_DEFINITIONS_QUERY = `
             name
             value
           }
-          pin {
-            pinnedPosition
-          }
+          pinnedPosition
         }
         cursor
       }

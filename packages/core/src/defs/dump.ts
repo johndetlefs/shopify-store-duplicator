@@ -28,14 +28,15 @@ export interface MetaobjectDefinition {
     renderable?: {
       enabled: boolean;
       data?: {
-        metaobjectId?: string;
-        metafieldKeys?: string[];
+        metaTitleKey?: string;
+        metaDescriptionKey?: string;
       };
     };
     onlineStore?: {
       enabled: boolean;
       data?: {
-        aliasMapping?: Array<{ key: string; value: string }>;
+        urlHandle?: string;
+        canCreateRedirects?: boolean;
       };
     };
   };
@@ -69,9 +70,7 @@ export interface MetafieldDefinition {
     name: string;
     value: string;
   }>;
-  pin?: {
-    pinnedPosition?: number;
-  };
+  pinnedPosition?: number;
 }
 
 export interface DefinitionsDump {
@@ -118,7 +117,7 @@ export async function dumpMetafieldDefinitions(
   client: GraphQLClient,
   ownerTypes: string[] = [
     "PRODUCT",
-    "PRODUCT_VARIANT",
+    "PRODUCTVARIANT",
     "COLLECTION",
     "PAGE",
     "ARTICLE",

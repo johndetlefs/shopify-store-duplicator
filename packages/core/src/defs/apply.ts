@@ -138,10 +138,7 @@ async function applyMetafieldDefinition(
           name: v.name,
           value: v.value,
         })),
-        pin:
-          def.pin?.pinnedPosition !== undefined
-            ? def.pin.pinnedPosition
-            : undefined,
+        pin: def.pinnedPosition !== undefined ? def.pinnedPosition : undefined,
       };
 
       const result = await client.request({
@@ -229,7 +226,7 @@ async function getExistingMetafieldKeys(
 
   const ownerTypes = [
     "PRODUCT",
-    "PRODUCT_VARIANT",
+    "PRODUCTVARIANT",
     "COLLECTION",
     "PAGE",
     "ARTICLE",

@@ -52,6 +52,18 @@ const __dirname = dirname(__filename);
 const workspaceRoot = resolve(__dirname, "../../../");
 dotenv.config({ path: resolve(workspaceRoot, ".env") });
 
+/**
+ * Helper to resolve paths relative to workspace root
+ */
+function resolveWorkspacePath(path: string): string {
+  // If absolute path, use as-is
+  if (resolve(path) === path) {
+    return path;
+  }
+  // Otherwise, resolve relative to workspace root
+  return resolve(workspaceRoot, path);
+}
+
 const program = new Command();
 
 program
@@ -99,7 +111,7 @@ program
 program
   .command("defs:dump")
   .description("Dump metaobject and metafield definitions from source store")
-  .option("-o, --output <file>", "Output file (default: stdout)")
+  .option("-o, --output <file>", "Output file", "data/source-defs.json")
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -132,12 +144,14 @@ program
 
     const json = JSON.stringify(result.data, null, 2);
 
-    if (options.output) {
-      await writeFile(options.output, json, "utf-8");
-      logger.info(`Definitions saved to ${options.output}`);
-    } else {
-      console.log(json);
-    }
+    const outputPath = resolveWorkspacePath(options.output);
+
+    // Ensure directory exists
+    const { mkdir } = await import("fs/promises");
+    await mkdir(dirname(outputPath), { recursive: true });
+
+    await writeFile(outputPath, json, "utf-8");
+    logger.info(`Definitions saved to ${outputPath}`);
   });
 
 // defs:apply - Apply definitions to destination
@@ -146,7 +160,7 @@ program
   .description(
     "Apply metaobject and metafield definitions to destination store"
   )
-  .option("-f, --file <file>", "Input file (default: stdin)")
+  .option("-f, --file <file>", "Input file", "data/source-defs.json")
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -162,18 +176,8 @@ program
     }
 
     // Read definitions
-    let defsJson: string;
-    if (options.file) {
-      defsJson = await readFile(options.file, "utf-8");
-    } else {
-      // Read from stdin
-      const chunks: Buffer[] = [];
-      for await (const chunk of process.stdin) {
-        chunks.push(chunk);
-      }
-      defsJson = Buffer.concat(chunks).toString("utf-8");
-    }
-
+    const filePath = resolveWorkspacePath(options.file);
+    const defsJson = await readFile(filePath, "utf-8");
     const defs = JSON.parse(defsJson);
 
     const client = createGraphQLClient({
@@ -246,7 +250,7 @@ program
 program
   .command("data:dump")
   .description("Dump metaobjects, metafields, and CMS content from source")
-  .option("-o, --output <dir>", "Output directory", "./dumps")
+  .option("-o, --output <dir>", "Output directory", "data/dumps")
   .option("--metaobjects-only", "Dump only metaobjects", false)
   .option("--products-only", "Dump only products", false)
   .option("--collections-only", "Dump only collections", false)
@@ -271,22 +275,23 @@ program
       apiVersion: globalOpts.apiVersion,
     });
 
-    logger.info(`Dumping data from source store to ${options.output}`);
+    const outputDir = resolveWorkspacePath(options.output);
+    logger.info(`Dumping data from source store to ${outputDir}`);
 
     let result;
 
     // Selective dump based on flags
     if (options.metaobjectsOnly) {
-      result = await dumpMetaobjects(client, options.output);
+      result = await dumpMetaobjects(client, outputDir);
     } else if (options.productsOnly) {
-      result = await dumpProducts(client, options.output);
+      result = await dumpProducts(client, outputDir);
     } else if (options.collectionsOnly) {
-      result = await dumpCollections(client, options.output);
+      result = await dumpCollections(client, outputDir);
     } else if (options.pagesOnly) {
-      result = await dumpPages(client, options.output);
+      result = await dumpPages(client, outputDir);
     } else {
       // Dump everything
-      result = await dumpAllData(client, options.output);
+      result = await dumpAllData(client, outputDir);
     }
 
     if (!result.ok) {
@@ -300,7 +305,7 @@ program
 program
   .command("data:apply")
   .description("Apply data to destination store")
-  .option("-i, --input <dir>", "Input directory", "./dumps")
+  .option("-i, --input <dir>", "Input directory", "data/dumps")
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -321,14 +326,16 @@ program
       apiVersion: globalOpts.apiVersion,
     });
 
+    const inputDir = resolveWorkspacePath(options.input);
+
     if (globalOpts.dryRun) {
-      logger.info("[DRY RUN] Would apply data from:", options.input);
+      logger.info("[DRY RUN] Would apply data from:", { inputDir });
       return;
     }
 
-    logger.info(`Applying data from ${options.input} to destination store`);
+    logger.info(`Applying data from ${inputDir} to destination store`);
 
-    const result = await applyAllData(client, options.input);
+    const result = await applyAllData(client, inputDir);
 
     if (!result.ok) {
       logger.error("Data apply failed", { error: result.error.message });
@@ -469,7 +476,7 @@ program
 program
   .command("menus:dump")
   .description("Dump menus from source store")
-  .option("-o, --output <file>", "Output file", "./dumps/menus.json")
+  .option("-o, --output <file>", "Output file", "data/menus.json")
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -490,9 +497,10 @@ program
       apiVersion: globalOpts.apiVersion,
     });
 
-    logger.info(`Dumping menus to ${options.output}`);
+    const outputPath = resolveWorkspacePath(options.output);
+    logger.info(`Dumping menus to ${outputPath}`);
 
-    const result = await dumpMenus(client, options.output);
+    const result = await dumpMenus(client, outputPath);
 
     if (!result.ok) {
       logger.error("Menus dump failed", { error: result.error.message });
@@ -505,7 +513,7 @@ program
 program
   .command("menus:apply")
   .description("Apply menus to destination store")
-  .option("-f, --file <file>", "Input file", "./dumps/menus.json")
+  .option("-f, --file <file>", "Input file", "data/menus.json")
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -526,8 +534,10 @@ program
       apiVersion: globalOpts.apiVersion,
     });
 
+    const filePath = resolveWorkspacePath(options.file);
+
     if (globalOpts.dryRun) {
-      logger.info("[DRY RUN] Would apply menus from:", options.file);
+      logger.info("[DRY RUN] Would apply menus from:", { filePath });
       return;
     }
 
@@ -535,11 +545,11 @@ program
     logger.info("Building destination index for menu URL remapping...");
     const index = await buildDestinationIndex(client);
 
-    logger.info(`Applying menus from ${options.file}`);
+    logger.info(`Applying menus from ${filePath}`);
 
     const result = await applyMenus(
       client,
-      options.file,
+      filePath,
       index,
       globalOpts.dstShop
     );
@@ -574,7 +584,7 @@ program
 program
   .command("redirects:dump")
   .description("Dump redirects from source store")
-  .option("-o, --output <file>", "Output file", "./dumps/redirects.json")
+  .option("-o, --output <file>", "Output file", "data/redirects.json")
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -595,9 +605,10 @@ program
       apiVersion: globalOpts.apiVersion,
     });
 
-    logger.info(`Dumping redirects to ${options.output}`);
+    const outputPath = resolveWorkspacePath(options.output);
+    logger.info(`Dumping redirects to ${outputPath}`);
 
-    const result = await dumpRedirects(client, options.output);
+    const result = await dumpRedirects(client, outputPath);
 
     if (!result.ok) {
       logger.error("Redirects dump failed", { error: result.error.message });
@@ -610,7 +621,7 @@ program
 program
   .command("redirects:apply")
   .description("Apply redirects to destination store")
-  .option("-f, --file <file>", "Input file", "./dumps/redirects.json")
+  .option("-f, --file <file>", "Input file", "data/redirects.json")
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -631,14 +642,16 @@ program
       apiVersion: globalOpts.apiVersion,
     });
 
+    const filePath = resolveWorkspacePath(options.file);
+
     if (globalOpts.dryRun) {
-      logger.info("[DRY RUN] Would apply redirects from:", options.file);
+      logger.info("[DRY RUN] Would apply redirects from:", { filePath });
       return;
     }
 
-    logger.info(`Applying redirects from ${options.file}`);
+    logger.info(`Applying redirects from ${filePath}`);
 
-    const result = await applyRedirects(client, options.file);
+    const result = await applyRedirects(client, filePath);
 
     if (!result.ok) {
       logger.error("Redirects apply failed", { error: result.error.message });

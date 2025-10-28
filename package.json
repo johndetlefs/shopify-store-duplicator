@@ -12,6 +12,7 @@
     "build": "npm run build --workspaces",
     "clean": "npm run clean --workspaces",
     "dev": "npm run dev -w @shopify-duplicator/cli",
+    "cli": "npm run dev -w @shopify-duplicator/cli --",
     "test": "npm test --workspaces"
   },
   "engines": {

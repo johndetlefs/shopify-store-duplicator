@@ -43,9 +43,14 @@ import {
   logger,
   type GraphQLClientConfig,
 } from "@shopify-duplicator/core";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 
-// Load environment variables
-dotenv.config();
+// Load environment variables from the workspace root
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const workspaceRoot = resolve(__dirname, "../../../");
+dotenv.config({ path: resolve(workspaceRoot, ".env") });
 
 const program = new Command();
 

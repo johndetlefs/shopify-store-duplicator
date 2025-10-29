@@ -346,6 +346,7 @@ program
   .option("--pages-only", "Apply pages only")
   .option("--blogs-only", "Apply blogs only")
   .option("--articles-only", "Apply articles only")
+  .option("--product-metafields-only", "Apply product metafields only")
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -382,6 +383,7 @@ program
       pagesOnly: options.pagesOnly,
       blogsOnly: options.blogsOnly,
       articlesOnly: options.articlesOnly,
+      productMetafieldsOnly: options.productMetafieldsOnly,
     });
 
     if (!result.ok) {

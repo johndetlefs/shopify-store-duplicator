@@ -355,20 +355,33 @@ function buildFieldValue(
 
 /**
  * Build the value string for a metafield after remapping references.
+ * Returns null if a reference cannot be resolved (resource doesn't exist in destination).
  */
 function buildMetafieldValue(
   mf: DumpedMetafield,
   index: DestinationIndex
-): string {
+): string | null {
   // If there's a single reference, remap it
   if (mf.refMetaobject || mf.refProduct || mf.refCollection) {
     const gid = remapMetafieldReference(mf, index);
     if (!gid) {
-      logger.warn("Failed to remap metafield reference", {
-        namespace: mf.namespace,
-        key: mf.key,
-      });
-      return mf.value; // Fall back to original value
+      logger.warn(
+        "Skipping metafield with invalid reference (resource not found in destination)",
+        {
+          namespace: mf.namespace,
+          key: mf.key,
+          refType: mf.refMetaobject
+            ? "metaobject"
+            : mf.refProduct
+            ? "product"
+            : "collection",
+          refHandle:
+            mf.refMetaobject?.handle ||
+            mf.refProduct?.handle ||
+            mf.refCollection?.handle,
+        }
+      );
+      return null; // Skip this metafield - reference is invalid
     }
     return gid;
   }
@@ -387,7 +400,23 @@ function buildMetafieldValue(
 
       if (gid) {
         gids.push(gid);
+      } else {
+        // Log warning for each missing reference in list
+        logger.warn("Skipping reference in list (not found in destination)", {
+          namespace: mf.namespace,
+          key: mf.key,
+          refType: ref.metaobjectType ? "metaobject" : "product",
+          refHandle: ref.metaobjectHandle || ref.productHandle,
+        });
       }
+    }
+    // If no valid references were found, return null to skip the metafield
+    if (gids.length === 0) {
+      logger.warn("Skipping metafield - no valid references in list", {
+        namespace: mf.namespace,
+        key: mf.key,
+      });
+      return null;
     }
     return JSON.stringify(gids);
   }
@@ -628,13 +657,15 @@ export async function applyProductMetafields(
       // Product-level metafields
       for (const mf of product.metafields) {
         const value = buildMetafieldValue(mf, index);
-        allMetafields.push({
-          namespace: mf.namespace,
-          key: mf.key,
-          value,
-          type: mf.type,
-          ownerId: productGid,
-        });
+        if (value !== null) {
+          allMetafields.push({
+            namespace: mf.namespace,
+            key: mf.key,
+            value,
+            type: mf.type,
+            ownerId: productGid,
+          });
+        }
       }
 
       // Variant-level metafields
@@ -649,13 +680,15 @@ export async function applyProductMetafields(
 
         for (const mf of variant.metafields) {
           const value = buildMetafieldValue(mf, index);
-          allMetafields.push({
-            namespace: mf.namespace,
-            key: mf.key,
-            value,
-            type: mf.type,
-            ownerId: variantGid,
-          });
+          if (value !== null) {
+            allMetafields.push({
+              namespace: mf.namespace,
+              key: mf.key,
+              value,
+              type: mf.type,
+              ownerId: variantGid,
+            });
+          }
         }
       }
     } catch (error) {
@@ -768,13 +801,15 @@ export async function applyCollectionMetafields(
 
       for (const mf of collection.metafields) {
         const value = buildMetafieldValue(mf, index);
-        allMetafields.push({
-          namespace: mf.namespace,
-          key: mf.key,
-          value,
-          type: mf.type,
-          ownerId: collectionGid,
-        });
+        if (value !== null) {
+          allMetafields.push({
+            namespace: mf.namespace,
+            key: mf.key,
+            value,
+            type: mf.type,
+            ownerId: collectionGid,
+          });
+        }
       }
     } catch (error) {
       logger.warn("Failed to process collection line", {
@@ -881,13 +916,15 @@ export async function applyPageMetafields(
 
       for (const mf of page.metafields) {
         const value = buildMetafieldValue(mf, index);
-        allMetafields.push({
-          namespace: mf.namespace,
-          key: mf.key,
-          value,
-          type: mf.type,
-          ownerId: pageGid,
-        });
+        if (value !== null) {
+          allMetafields.push({
+            namespace: mf.namespace,
+            key: mf.key,
+            value,
+            type: mf.type,
+            ownerId: pageGid,
+          });
+        }
       }
     } catch (error) {
       logger.warn("Failed to process page line", { error: String(error) });
@@ -998,13 +1035,15 @@ export async function applyShopMetafields(
     try {
       const mf = JSON.parse(line) as DumpedMetafield;
       const value = buildMetafieldValue(mf, index);
-      allMetafields.push({
-        namespace: mf.namespace,
-        key: mf.key,
-        value,
-        type: mf.type,
-        ownerId: shopGid,
-      });
+      if (value !== null) {
+        allMetafields.push({
+          namespace: mf.namespace,
+          key: mf.key,
+          value,
+          type: mf.type,
+          ownerId: shopGid,
+        });
+      }
     } catch (error) {
       logger.warn("Failed to process shop metafield line", {
         error: String(error),
@@ -2091,6 +2130,7 @@ export interface ApplyOptions {
   pagesOnly?: boolean;
   blogsOnly?: boolean;
   articlesOnly?: boolean;
+  productMetafieldsOnly?: boolean;
 }
 
 export async function applyAllData(
@@ -2121,7 +2161,8 @@ export async function applyAllData(
     !options.metaobjectsOnly &&
     !options.pagesOnly &&
     !options.blogsOnly &&
-    !options.articlesOnly;
+    !options.articlesOnly &&
+    !options.productMetafieldsOnly;
 
   // Step 1: Build destination index
   logger.info("Step 1: Building destination index...");
@@ -2277,7 +2318,7 @@ export async function applyAllData(
 
   const finalIndex = updatedIndex;
 
-  // Step 9: Apply metafields (to all resources) - only if doing full apply
+  // Step 9: Apply metafields (to all resources) - only if doing full apply or specific metafield flags
   const aggregateMetafields: ApplyStats = {
     total: 0,
     created: 0,
@@ -2287,67 +2328,75 @@ export async function applyAllData(
     errors: [],
   };
 
-  if (applyAll) {
+  if (applyAll || options.productMetafieldsOnly) {
     logger.info("Step 9: Applying metafields...");
 
     // Products metafields
-    const productsFile = path.join(inputDir, "products.jsonl");
-    const productMfResult = await applyProductMetafields(
-      client,
-      productsFile,
-      finalIndex
-    );
-    if (productMfResult.ok) {
-      const stats = productMfResult.data;
-      aggregateMetafields.total += stats.total;
-      aggregateMetafields.created += stats.created;
-      aggregateMetafields.failed += stats.failed;
-      aggregateMetafields.errors.push(...stats.errors);
+    if (applyAll || options.productMetafieldsOnly) {
+      const productsFile = path.join(inputDir, "products.jsonl");
+      const productMfResult = await applyProductMetafields(
+        client,
+        productsFile,
+        finalIndex
+      );
+      if (productMfResult.ok) {
+        const stats = productMfResult.data;
+        aggregateMetafields.total += stats.total;
+        aggregateMetafields.created += stats.created;
+        aggregateMetafields.failed += stats.failed;
+        aggregateMetafields.errors.push(...stats.errors);
+      }
     }
 
     // Collections metafields
-    const collectionsFile = path.join(inputDir, "collections.jsonl");
-    const collectionMfResult = await applyCollectionMetafields(
-      client,
-      collectionsFile,
-      finalIndex
-    );
-    if (collectionMfResult.ok) {
-      const stats = collectionMfResult.data;
-      aggregateMetafields.total += stats.total;
-      aggregateMetafields.created += stats.created;
-      aggregateMetafields.failed += stats.failed;
-      aggregateMetafields.errors.push(...stats.errors);
+    if (applyAll) {
+      const collectionsFile = path.join(inputDir, "collections.jsonl");
+      const collectionMfResult = await applyCollectionMetafields(
+        client,
+        collectionsFile,
+        finalIndex
+      );
+      if (collectionMfResult.ok) {
+        const stats = collectionMfResult.data;
+        aggregateMetafields.total += stats.total;
+        aggregateMetafields.created += stats.created;
+        aggregateMetafields.failed += stats.failed;
+        aggregateMetafields.errors.push(...stats.errors);
+      }
     }
 
     // Pages metafields
-    const pagesFile = path.join(inputDir, "pages.jsonl");
-    const pageMfResult = await applyPageMetafields(
-      client,
-      pagesFile,
-      finalIndex
-    );
-    if (pageMfResult.ok) {
-      const stats = pageMfResult.data;
-      aggregateMetafields.total += stats.total;
-      aggregateMetafields.created += stats.created;
-      aggregateMetafields.failed += stats.failed;
-      aggregateMetafields.errors.push(...stats.errors);
+    if (applyAll) {
+      const pagesFile = path.join(inputDir, "pages.jsonl");
+      const pageMfResult = await applyPageMetafields(
+        client,
+        pagesFile,
+        finalIndex
+      );
+      if (pageMfResult.ok) {
+        const stats = pageMfResult.data;
+        aggregateMetafields.total += stats.total;
+        aggregateMetafields.created += stats.created;
+        aggregateMetafields.failed += stats.failed;
+        aggregateMetafields.errors.push(...stats.errors);
+      }
     }
 
     // Shop metafields
-    const shopMetafieldsFile = path.join(inputDir, "shop-metafields.jsonl");
-    const shopMfResult = await applyShopMetafields(
-      client,
-      shopMetafieldsFile,
-      finalIndex
-    );
-    if (shopMfResult.ok) {
-      const stats = shopMfResult.data;
-      aggregateMetafields.total += stats.total;
-      aggregateMetafields.created += stats.created;
-      aggregateMetafields.failed += stats.failed;
-      aggregateMetafields.errors.push(...stats.errors);
+    if (applyAll) {
+      const shopMetafieldsFile = path.join(inputDir, "shop-metafields.jsonl");
+      const shopMfResult = await applyShopMetafields(
+        client,
+        shopMetafieldsFile,
+        finalIndex
+      );
+      if (shopMfResult.ok) {
+        const stats = shopMfResult.data;
+        aggregateMetafields.total += stats.total;
+        aggregateMetafields.created += stats.created;
+        aggregateMetafields.failed += stats.failed;
+        aggregateMetafields.errors.push(...stats.errors);
+      }
     }
   }
 

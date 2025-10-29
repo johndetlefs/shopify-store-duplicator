@@ -126,6 +126,12 @@ interface DumpedProduct {
     position: number;
     values: string[];
   }>;
+  media?: Array<{
+    id: string;
+    url: string;
+    alt?: string;
+    mediaType: string;
+  }>;
   metafields: DumpedMetafield[];
   variants: DumpedVariant[];
 }
@@ -1115,7 +1121,8 @@ export async function applyShopMetafields(
 export async function applyProducts(
   client: GraphQLClient,
   inputFile: string,
-  index: DestinationIndex
+  index: DestinationIndex,
+  fileIndex?: FileIndex
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Products ===");
 
@@ -1161,15 +1168,17 @@ export async function applyProducts(
 
       if (existingProductGid) {
         // Product exists - update it
+        const updateInput: any = {
+          id: existingProductGid,
+          title: productTitle,
+          descriptionHtml: product.descriptionHtml || "",
+          status: product.status || "ACTIVE",
+        };
+
         const result = await client.request({
           query: PRODUCT_UPDATE,
           variables: {
-            product: {
-              id: existingProductGid,
-              title: productTitle,
-              descriptionHtml: product.descriptionHtml || "",
-              status: product.status || "ACTIVE",
-            },
+            product: updateInput,
           },
         });
 
@@ -1196,6 +1205,59 @@ export async function applyProducts(
             errors: response.userErrors,
           });
           continue;
+        }
+
+        // Update media separately if present
+        if (product.media && product.media.length > 0 && fileIndex) {
+          const { PRODUCT_CREATE_MEDIA } = await import(
+            "../graphql/queries.js"
+          );
+
+          const mediaInputs = product.media
+            .map((m) => {
+              // Use destination URL for productCreateMedia (not GID)
+              const destUrl = fileIndex.gidToUrl.get(m.id);
+              if (destUrl) {
+                return {
+                  mediaContentType:
+                    m.mediaType === "MediaImage" ? "IMAGE" : "VIDEO",
+                  alt: m.alt || "",
+                  originalSource: destUrl,
+                };
+              }
+              return null;
+            })
+            .filter((m) => m !== null);
+
+          if (mediaInputs.length > 0) {
+            const mediaResult = await client.request({
+              query: PRODUCT_CREATE_MEDIA,
+              variables: {
+                productId: existingProductGid,
+                media: mediaInputs,
+              },
+            });
+
+            if (!mediaResult.ok) {
+              logger.warn(`Failed to add media to product ${product.handle}`, {
+                error: mediaResult.error.message,
+              });
+            } else {
+              const mediaResponse = mediaResult.data.data?.productCreateMedia;
+              if (
+                mediaResponse?.mediaUserErrors &&
+                mediaResponse.mediaUserErrors.length > 0
+              ) {
+                logger.warn(`Media user errors for product ${product.handle}`, {
+                  errors: mediaResponse.mediaUserErrors,
+                });
+              } else {
+                logger.debug(
+                  `✓ Added ${mediaInputs.length} media items to product: ${product.handle}`
+                );
+              }
+            }
+          }
         }
 
         stats.updated++;
@@ -1240,11 +1302,34 @@ export async function applyProducts(
           }));
         }
 
+        // Prepare media parameter separately (not in productInput)
+        const mediaParam: any[] = [];
+        if (product.media && product.media.length > 0 && fileIndex) {
+          for (const m of product.media) {
+            // Use destination URL for media (not GID)
+            const destUrl = fileIndex.gidToUrl.get(m.id);
+            if (destUrl) {
+              mediaParam.push({
+                mediaContentType:
+                  m.mediaType === "MediaImage" ? "IMAGE" : "VIDEO",
+                alt: m.alt || "",
+                originalSource: destUrl,
+              });
+            }
+          }
+        }
+
+        const variables: any = {
+          product: productInput,
+        };
+
+        if (mediaParam.length > 0) {
+          variables.media = mediaParam;
+        }
+
         const result = await client.request({
           query: PRODUCT_CREATE,
-          variables: {
-            product: productInput,
-          },
+          variables,
         });
 
         if (!result.ok) {
@@ -2184,7 +2269,11 @@ export async function applyAllData(
   const index = await buildDestinationIndex(client);
 
   // Step 2: Apply files (BEFORE metaobjects so we can relink file references)
-  let fileIndex: FileIndex = { urlToGid: new Map(), gidToGid: new Map() };
+  let fileIndex: FileIndex = {
+    urlToGid: new Map(),
+    gidToGid: new Map(),
+    gidToUrl: new Map(),
+  };
   if (applyAll || options.metaobjectsOnly) {
     logger.info("Step 2: Applying files...");
     const filesFile = path.join(inputDir, "files.jsonl");
@@ -2230,7 +2319,12 @@ export async function applyAllData(
   if (applyAll || options.productsOnly) {
     logger.info("Step 4: Applying products...");
     const productsFile = path.join(inputDir, "products.jsonl");
-    productsResult = await applyProducts(client, productsFile, updatedIndex);
+    productsResult = await applyProducts(
+      client,
+      productsFile,
+      updatedIndex,
+      fileIndex
+    );
     if (!productsResult.ok) {
       logger.warn("Products apply failed, continuing...");
     }

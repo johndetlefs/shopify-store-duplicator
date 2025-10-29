@@ -10,6 +10,7 @@
  * - data:dump - Dump data from source store
  * - data:apply - Apply data to destination store
  * - data:diff - Compare data
+ * - data:drop - Delete data from destination store
  * - files:apply - Seed files to destination
  * - menus:dump/apply - Handle menus
  * - redirects:dump/apply - Handle redirects
@@ -18,6 +19,7 @@
 import { Command } from "commander";
 import dotenv from "dotenv";
 import { readFile, writeFile } from "fs/promises";
+import { createInterface } from "readline";
 import {
   createGraphQLClient,
   dumpDefinitions,
@@ -36,6 +38,7 @@ import {
   diffData,
   buildDestinationIndex,
   applyFiles,
+  dropFiles,
   dumpMenus,
   applyMenus,
   dumpRedirects,
@@ -75,6 +78,7 @@ function formatStatsTable(
     updated?: number;
     failed?: number;
     uploaded?: number;
+    deleted?: number;
     skipped?: number;
   }
 ): string {
@@ -90,12 +94,31 @@ function formatStatsTable(
     lines.push(`  Updated:  ${stats.updated.toString().padStart(6)}`);
   if (stats.uploaded !== undefined)
     lines.push(`  Uploaded: ${stats.uploaded.toString().padStart(6)}`);
+  if (stats.deleted !== undefined)
+    lines.push(`  Deleted:  ${stats.deleted.toString().padStart(6)}`);
   if (stats.skipped !== undefined)
     lines.push(`  Skipped:  ${stats.skipped.toString().padStart(6)}`);
   if (stats.failed !== undefined)
     lines.push(`  Failed:   ${stats.failed.toString().padStart(6)}`);
 
   return lines.join("\n");
+}
+
+/**
+ * Prompt user for confirmation by typing a word
+ */
+async function promptConfirmation(confirmWord: string): Promise<boolean> {
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question(`Type '${confirmWord}' to confirm: `, (answer) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase() === confirmWord.toLowerCase());
+    });
+  });
 }
 
 const program = new Command();
@@ -591,6 +614,133 @@ program
       uploaded: result.data.urlToGid.size,
       mappings: result.data.gidToGid.size,
     });
+  });
+
+/**
+ * DATA DROP COMMANDS
+ */
+
+program
+  .command("data:drop")
+  .description("Delete data from destination store (DESTRUCTIVE)")
+  .option("--files-only", "Delete only files")
+  .option("--products-only", "Delete only products (NOT YET IMPLEMENTED)")
+  .option("--collections-only", "Delete only collections (NOT YET IMPLEMENTED)")
+  .option("--metaobjects-only", "Delete only metaobjects (NOT YET IMPLEMENTED)")
+  .action(async (options) => {
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.dstShop || !globalOpts.dstToken) {
+      logger.error(
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    // Check which data type to drop
+    const shouldDropFiles = options.filesOnly;
+    const shouldDropProducts = options.productsOnly;
+    const shouldDropCollections = options.collectionsOnly;
+    const shouldDropMetaobjects = options.metaobjectsOnly;
+
+    // Require at least one flag
+    if (
+      !shouldDropFiles &&
+      !shouldDropProducts &&
+      !shouldDropCollections &&
+      !shouldDropMetaobjects
+    ) {
+      logger.error("You must specify which data to drop:");
+      logger.error("  --files-only         Delete all files");
+      logger.error("  --products-only      Delete all products (coming soon)");
+      logger.error(
+        "  --collections-only   Delete all collections (coming soon)"
+      );
+      logger.error(
+        "  --metaobjects-only   Delete all metaobjects (coming soon)"
+      );
+      logger.error("");
+      logger.error("Example: npm run cli -- data:drop --files-only");
+      process.exit(1);
+    }
+
+    // Warn user about destructive operation
+    logger.warn(
+      "⚠️  WARNING: This will PERMANENTLY DELETE data from your destination store!"
+    );
+    logger.warn("");
+    if (shouldDropFiles) logger.warn("  - All files will be deleted");
+    if (shouldDropProducts) logger.warn("  - All products will be deleted");
+    if (shouldDropCollections)
+      logger.warn("  - All collections will be deleted");
+    if (shouldDropMetaobjects)
+      logger.warn("  - All metaobjects will be deleted");
+    logger.warn("");
+    logger.warn(`Destination store: ${globalOpts.dstShop}`);
+    logger.warn("");
+
+    if (globalOpts.dryRun) {
+      logger.info("[DRY RUN] Would delete the above data types");
+      return;
+    }
+
+    // Interactive confirmation
+    const confirmed = await promptConfirmation("delete");
+
+    if (!confirmed) {
+      logger.info("Aborted. No data was deleted.");
+      process.exit(0);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.dstShop,
+      accessToken: globalOpts.dstToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    logger.info("");
+    logger.info("Starting deletion...");
+
+    // Drop files
+    if (shouldDropFiles) {
+      logger.info("=== Dropping Files ===");
+      const result = await dropFiles(client);
+
+      if (!result.ok) {
+        logger.error("Failed to drop files", { error: result.error.message });
+        process.exit(1);
+      }
+
+      console.log(
+        formatStatsTable("Files Dropped", {
+          total: result.data.total,
+          deleted: result.data.deleted,
+          failed: result.data.failed,
+        })
+      );
+    }
+
+    // Future: Drop products
+    if (shouldDropProducts) {
+      logger.warn("Product deletion not yet implemented");
+    }
+
+    // Future: Drop collections
+    if (shouldDropCollections) {
+      logger.warn("Collection deletion not yet implemented");
+    }
+
+    // Future: Drop metaobjects
+    if (shouldDropMetaobjects) {
+      logger.warn("Metaobject deletion not yet implemented");
+    }
+
+    logger.info("");
+    logger.info("✓ Drop operation complete");
   });
 
 /**

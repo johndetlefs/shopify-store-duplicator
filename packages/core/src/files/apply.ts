@@ -33,6 +33,8 @@ export interface FileIndex {
   urlToGid: Map<string, string>;
   // Maps source file GID → destination file GID
   gidToGid: Map<string, string>;
+  // Maps source file GID → destination file URL
+  gidToUrl: Map<string, string>;
 }
 
 /**
@@ -48,6 +50,7 @@ export async function applyFiles(
   const fileIndex: FileIndex = {
     urlToGid: new Map(),
     gidToGid: new Map(),
+    gidToUrl: new Map(),
   };
 
   if (!fs.existsSync(inputFile)) {
@@ -102,6 +105,9 @@ export async function applyFiles(
         // Build index for relinking
         fileIndex.urlToGid.set(file.url, result.data.destinationId);
         fileIndex.gidToGid.set(file.sourceId, result.data.destinationId);
+        if (result.data.destinationUrl) {
+          fileIndex.gidToUrl.set(file.sourceId, result.data.destinationUrl);
+        }
         uploaded++;
 
         if (uploaded % 10 === 0) {

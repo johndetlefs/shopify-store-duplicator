@@ -307,6 +307,26 @@ export const PRODUCTS_BULK = `
             position
             values
           }
+          media(first: 250) {
+            edges {
+              node {
+                ... on MediaImage {
+                  id
+                  alt
+                  image {
+                    url
+                  }
+                }
+                ... on Video {
+                  id
+                  alt
+                  sources {
+                    url
+                  }
+                }
+              }
+            }
+          }
           metafields(first: 250) {
             edges {
               node {
@@ -329,22 +349,6 @@ export const PRODUCTS_BULK = `
                   ... on Collection {
                     id
                     handle
-                  }
-                }
-                references(first: 250) {
-                  edges {
-                    node {
-                      __typename
-                      ... on Metaobject {
-                        id
-                        type
-                        handle
-                      }
-                      ... on Product {
-                        id
-                        handle
-                      }
-                    }
                   }
                 }
               }
@@ -1120,8 +1124,8 @@ export const METAOBJECTS_HANDLES_QUERY = `
 `;
 
 export const PRODUCT_CREATE = `
-  mutation productCreate($product: ProductCreateInput!) {
-    productCreate(product: $product) {
+  mutation productCreate($product: ProductCreateInput!, $media: [CreateMediaInput!]) {
+    productCreate(product: $product, media: $media) {
       product {
         id
         handle
@@ -1146,6 +1150,25 @@ export const PRODUCT_UPDATE = `
       userErrors {
         field
         message
+      }
+    }
+  }
+`;
+
+export const PRODUCT_CREATE_MEDIA = `
+  mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+    productCreateMedia(productId: $productId, media: $media) {
+      media {
+        id
+        alt
+        mediaContentType
+      }
+      mediaUserErrors {
+        field
+        message
+      }
+      product {
+        id
       }
     }
   }
@@ -1210,6 +1233,44 @@ export const COLLECTION_UPDATE = `
       userErrors {
         field
         message
+      }
+    }
+  }
+`;
+
+/**
+ * Resolve GIDs to handles for list-type metafield references
+ */
+export const RESOLVE_NODES_QUERY = `
+  query resolveNodes($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Product {
+        id
+        handle
+      }
+      ... on Collection {
+        id
+        handle
+      }
+      ... on Metaobject {
+        id
+        type
+        handle
+      }
+      ... on Page {
+        id
+        handle
+      }
+      ... on Blog {
+        id
+        handle
+      }
+      ... on Article {
+        id
+        handle
+        blog {
+          handle
+        }
       }
     }
   }

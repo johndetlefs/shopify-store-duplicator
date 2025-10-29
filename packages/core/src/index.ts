@@ -34,6 +34,9 @@ export * from "./files/dump.js";
 export * from "./files/apply.js";
 export * from "./files/relink.js";
 
+// Drop (delete) operations
+export * from "./drop/index.js";
+
 // Menus
 export * from "./menus/dump.js";
 export * from "./menus/apply.js";

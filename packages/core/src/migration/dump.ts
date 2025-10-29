@@ -168,6 +168,8 @@ interface DumpedField {
     variantProductHandle?: string;
     collectionHandle?: string;
     pageHandle?: string;
+    blogHandle?: string;
+    articleHandle?: string;
   }>;
 }
 
@@ -185,6 +187,12 @@ interface DumpedProduct {
     name: string;
     position: number;
     values: string[];
+  }>;
+  media?: Array<{
+    id: string;
+    url: string;
+    alt?: string;
+    mediaType: string;
   }>;
   metafields: DumpedMetafield[];
   variants: DumpedVariant[];
@@ -232,6 +240,10 @@ interface DumpedMetafield {
     metaobjectHandle?: string;
     metaobjectType?: string;
     productHandle?: string;
+    collectionHandle?: string;
+    pageHandle?: string;
+    blogHandle?: string;
+    articleHandle?: string;
   }>;
 }
 
@@ -424,9 +436,217 @@ function transformMetaobjectField(field: MetaobjectField): DumpedField {
 }
 
 /**
+ * Resolve list-type metafield references by querying GIDs
+ */
+async function resolveListReferences(
+  client: GraphQLClient,
+  gids: string[]
+): Promise<DumpedField["refList"]> {
+  if (gids.length === 0) return [];
+
+  const { RESOLVE_NODES_QUERY } = await import("../graphql/queries.js");
+
+  const result = await client.request<{
+    nodes: Array<
+      | { id: string; handle: string; __typename: "Product" }
+      | { id: string; handle: string; __typename: "Collection" }
+      | { id: string; type: string; handle: string; __typename: "Metaobject" }
+      | { id: string; handle: string; __typename: "Page" }
+      | { id: string; handle: string; __typename: "Blog" }
+      | {
+          id: string;
+          handle: string;
+          blog: { handle: string };
+          __typename: "Article";
+        }
+      | null
+    >;
+  }>({
+    query: RESOLVE_NODES_QUERY,
+    variables: { ids: gids },
+  });
+
+  if (!result.ok) {
+    logger.warn("Failed to resolve list references", { error: result.error });
+    return [];
+  }
+
+  const refList: DumpedField["refList"] = [];
+  const nodes = result.data.data?.nodes || [];
+
+  for (const node of nodes) {
+    if (!node) continue;
+
+    if (node.__typename === "Product") {
+      refList.push({ type: "product", productHandle: node.handle });
+    } else if (node.__typename === "Collection") {
+      refList.push({ type: "collection", collectionHandle: node.handle });
+    } else if (node.__typename === "Metaobject") {
+      refList.push({
+        type: "metaobject",
+        metaobjectType: node.type,
+        metaobjectHandle: node.handle,
+      });
+    } else if (node.__typename === "Page") {
+      refList.push({ type: "page", pageHandle: node.handle });
+    } else if (node.__typename === "Blog") {
+      refList.push({ type: "blog", blogHandle: node.handle });
+    } else if (node.__typename === "Article") {
+      refList.push({
+        type: "article",
+        blogHandle: node.blog.handle,
+        articleHandle: node.handle,
+      });
+    }
+  }
+
+  return refList;
+}
+
+/**
+ * Batch resolve list-type metafield GIDs to natural keys.
+ * Returns a map from GID to natural key object.
+ */
+async function batchResolveListGids(
+  client: GraphQLClient,
+  gids: Set<string>
+): Promise<Map<string, NonNullable<DumpedField["refList"]>[number]>> {
+  type RefListItem = NonNullable<DumpedField["refList"]>[number];
+  const gidToNaturalKey = new Map<string, RefListItem>();
+
+  if (gids.size === 0) return gidToNaturalKey;
+
+  const { RESOLVE_NODES_QUERY } = await import("../graphql/queries.js");
+  const gidsArray = Array.from(gids);
+
+  logger.info(
+    `Batch resolving ${gidsArray.length} list-type metafield references...`
+  );
+
+  // Process in chunks of 250 (Shopify limit for nodes query)
+  for (let i = 0; i < gidsArray.length; i += 250) {
+    const chunk = gidsArray.slice(i, i + 250);
+    const result = await client.request<{
+      nodes: Array<
+        | { id: string; handle: string; __typename: "Product" }
+        | { id: string; handle: string; __typename: "Collection" }
+        | { id: string; type: string; handle: string; __typename: "Metaobject" }
+        | { id: string; handle: string; __typename: "Page" }
+        | { id: string; handle: string; __typename: "Blog" }
+        | {
+            id: string;
+            handle: string;
+            blog: { handle: string };
+            __typename: "Article";
+          }
+        | null
+      >;
+    }>({
+      query: RESOLVE_NODES_QUERY,
+      variables: { ids: chunk },
+    });
+
+    if (result.ok) {
+      const nodes = result.data.data?.nodes || [];
+      for (let j = 0; j < nodes.length; j++) {
+        const node = nodes[j];
+        const gid = chunk[j];
+        if (!node) continue;
+
+        if (node.__typename === "Product") {
+          gidToNaturalKey.set(gid, {
+            type: "product",
+            productHandle: node.handle,
+          });
+        } else if (node.__typename === "Collection") {
+          gidToNaturalKey.set(gid, {
+            type: "collection",
+            collectionHandle: node.handle,
+          });
+        } else if (node.__typename === "Metaobject") {
+          gidToNaturalKey.set(gid, {
+            type: "metaobject",
+            metaobjectType: node.type,
+            metaobjectHandle: node.handle,
+          });
+        } else if (node.__typename === "Page") {
+          gidToNaturalKey.set(gid, { type: "page", pageHandle: node.handle });
+        } else if (node.__typename === "Blog") {
+          gidToNaturalKey.set(gid, { type: "blog", blogHandle: node.handle });
+        } else if (node.__typename === "Article") {
+          gidToNaturalKey.set(gid, {
+            type: "article",
+            blogHandle: node.blog.handle,
+            articleHandle: node.handle,
+          });
+        }
+      }
+    }
+  }
+
+  logger.info(`✓ Resolved ${gidToNaturalKey.size} list references`);
+  return gidToNaturalKey;
+}
+
+/**
+ * Transform metafield to dumped format with natural keys.
+ * For list-type references, pass the client to resolve GIDs.
+ */
+async function transformMetafield(
+  mf: MetafieldEdge["node"],
+  client?: GraphQLClient
+): Promise<DumpedMetafield> {
+  const dumped: DumpedMetafield = {
+    namespace: mf.namespace,
+    key: mf.key,
+    value: mf.value,
+    type: mf.type,
+  };
+
+  // Single reference
+  if (mf.reference) {
+    const refKeys = extractReferenceKey(mf.reference);
+    if (refKeys.refMetaobject) dumped.refMetaobject = refKeys.refMetaobject;
+    if (refKeys.refProduct) dumped.refProduct = refKeys.refProduct;
+    if (refKeys.refCollection) dumped.refCollection = refKeys.refCollection;
+  }
+
+  // List of references - check if value is JSON array of GIDs
+  if (mf.type.startsWith("list.") && mf.type.includes("_reference") && client) {
+    try {
+      const parsed = JSON.parse(mf.value);
+      if (
+        Array.isArray(parsed) &&
+        parsed.every(
+          (item) => typeof item === "string" && item.startsWith("gid://")
+        )
+      ) {
+        // Resolve the GIDs to handles
+        dumped.refList = await resolveListReferences(client, parsed);
+      }
+    } catch (err) {
+      // Not JSON or not an array of GIDs, skip
+      logger.debug("List-type metafield value is not a JSON array of GIDs", {
+        namespace: mf.namespace,
+        key: mf.key,
+        type: mf.type,
+      });
+    }
+  }
+
+  // Legacy: List of references from nested query (if present)
+  if (mf.references?.edges) {
+    const refs = mf.references.edges.map((e) => e.node);
+    dumped.refList = extractReferenceList(refs);
+  }
+
+  return dumped;
+}
+
+/**
  * Transform metafield to dumped format with natural keys
  */
-function transformMetafield(mf: MetafieldEdge["node"]): DumpedMetafield {
+function transformMetafieldSync(mf: MetafieldEdge["node"]): DumpedMetafield {
   const dumped: DumpedMetafield = {
     namespace: mf.namespace,
     key: mf.key,
@@ -616,7 +836,7 @@ export async function dumpProducts(
   // Build hierarchical structure from flat JSONL
   const productsMap = new Map<string, DumpedProduct>();
   const variantsMap = new Map<string, DumpedVariant>();
-  const metafieldsByOwner = new Map<string, DumpedMetafield[]>();
+  const listReferenceGids = new Set<string>(); // Collect all GIDs from list-type metafields
 
   for await (const entry of result.data) {
     try {
@@ -643,10 +863,31 @@ export async function dumpProducts(
             position: opt.position,
             values: opt.values,
           })),
+          media: [],
           metafields: [],
           variants: [],
         };
         productsMap.set(obj.id, product);
+      } else if (typename === "MediaImage" || typename === "Video") {
+        // Media (child of product)
+        if (parentId) {
+          const product = productsMap.get(parentId);
+          if (product) {
+            const media = {
+              id: obj.id,
+              url:
+                typename === "MediaImage"
+                  ? obj.image?.url
+                  : obj.sources?.[0]?.url,
+              alt: obj.alt || "",
+              mediaType: typename,
+            };
+            if (media.url) {
+              product.media = product.media || [];
+              product.media.push(media);
+            }
+          }
+        }
       } else if (typename === "ProductVariant") {
         // Variant (child of product)
         const variant: DumpedVariant = {
@@ -702,6 +943,28 @@ export async function dumpProducts(
         if (obj.references?.edges) {
           const refs = obj.references.edges.map((e: any) => e.node);
           metafield.refList = extractReferenceList(refs);
+        } else if (
+          obj.type.startsWith("list.") &&
+          obj.type.includes("_reference")
+        ) {
+          // No references field (removed to save connections), but value contains GIDs
+          try {
+            const parsed = JSON.parse(obj.value);
+            if (
+              Array.isArray(parsed) &&
+              parsed.every(
+                (item: any) =>
+                  typeof item === "string" && item.startsWith("gid://")
+              )
+            ) {
+              // Collect GIDs for batch resolution later
+              parsed.forEach((gid: string) => listReferenceGids.add(gid));
+              // Mark this metafield as needing resolution (we'll store the parent ID temporarily)
+              (metafield as any)._listGids = parsed;
+            }
+          } catch (err) {
+            // Not JSON, skip
+          }
         }
 
         // Add to parent (product or variant)
@@ -720,6 +983,37 @@ export async function dumpProducts(
       logger.warn("Failed to parse product-related entry:", {
         error: String(err),
       });
+    }
+  }
+
+  // Resolve all list references in one batch
+  const gidToNaturalKey = await batchResolveListGids(client, listReferenceGids);
+
+  // Now resolve the _listGids in all metafields
+  for (const product of productsMap.values()) {
+    for (const metafield of product.metafields) {
+      if ((metafield as any)._listGids) {
+        const gids = (metafield as any)._listGids as string[];
+        metafield.refList = gids
+          .map((gid: string) => gidToNaturalKey.get(gid))
+          .filter(
+            (item): item is NonNullable<typeof item> => item !== undefined
+          );
+        delete (metafield as any)._listGids;
+      }
+    }
+    for (const variant of product.variants) {
+      for (const metafield of variant.metafields) {
+        if ((metafield as any)._listGids) {
+          const gids = (metafield as any)._listGids as string[];
+          metafield.refList = gids
+            .map((gid: string) => gidToNaturalKey.get(gid))
+            .filter(
+              (item): item is NonNullable<typeof item> => item !== undefined
+            );
+          delete (metafield as any)._listGids;
+        }
+      }
     }
   }
 
@@ -762,6 +1056,7 @@ export async function dumpCollections(
 
   // Build hierarchical structure from flat JSONL
   const collectionsMap = new Map<string, DumpedCollection>();
+  const listReferenceGids = new Set<string>();
 
   for await (const entry of result.data) {
     try {
@@ -806,6 +1101,25 @@ export async function dumpCollections(
         if (obj.references?.edges) {
           const refs = obj.references.edges.map((e: any) => e.node);
           metafield.refList = extractReferenceList(refs);
+        } else if (
+          obj.type.startsWith("list.") &&
+          obj.type.includes("_reference")
+        ) {
+          try {
+            const parsed = JSON.parse(obj.value);
+            if (
+              Array.isArray(parsed) &&
+              parsed.every(
+                (item: any) =>
+                  typeof item === "string" && item.startsWith("gid://")
+              )
+            ) {
+              parsed.forEach((gid: string) => listReferenceGids.add(gid));
+              (metafield as any)._listGids = parsed;
+            }
+          } catch (err) {
+            // Not JSON, skip
+          }
         }
 
         // Add to parent collection
@@ -818,6 +1132,24 @@ export async function dumpCollections(
       }
     } catch (err) {
       logger.warn("Failed to parse collection entry:", { error: String(err) });
+    }
+  }
+
+  // Resolve all list references in one batch
+  const gidToNaturalKey = await batchResolveListGids(client, listReferenceGids);
+
+  // Resolve the _listGids in all metafields
+  for (const collection of collectionsMap.values()) {
+    for (const metafield of collection.metafields) {
+      if ((metafield as any)._listGids) {
+        const gids = (metafield as any)._listGids as string[];
+        metafield.refList = gids
+          .map((gid: string) => gidToNaturalKey.get(gid))
+          .filter(
+            (item): item is NonNullable<typeof item> => item !== undefined
+          );
+        delete (metafield as any)._listGids;
+      }
     }
   }
 

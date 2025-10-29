@@ -1480,14 +1480,23 @@ export async function applyCollections(
         collection.handle
       );
 
+      // Ensure title is not null or empty - use handle as fallback
+      const collectionTitle =
+        collection.title && collection.title.trim()
+          ? collection.title
+          : collection.handle
+              .split("-")
+              .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+              .join(" ");
+
       if (existingCollectionGid) {
         // Collection exists - update it
         const result = await client.request({
           query: COLLECTION_UPDATE,
           variables: {
-            id: existingCollectionGid,
             input: {
-              title: collection.title,
+              id: existingCollectionGid,
+              title: collectionTitle,
               descriptionHtml: collection.descriptionHtml || "",
             },
           },
@@ -1529,7 +1538,7 @@ export async function applyCollections(
           query: COLLECTION_CREATE,
           variables: {
             input: {
-              title: collection.title,
+              title: collectionTitle,
               handle: collection.handle,
               descriptionHtml: collection.descriptionHtml || "",
             },

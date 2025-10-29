@@ -1192,8 +1192,8 @@ export const COLLECTION_CREATE = `
 `;
 
 export const COLLECTION_UPDATE = `
-  mutation collectionUpdate($id: ID!, $input: CollectionInput!) {
-    collectionUpdate(id: $id, input: $input) {
+  mutation collectionUpdate($input: CollectionInput!) {
+    collectionUpdate(input: $input) {
       collection {
         id
         handle

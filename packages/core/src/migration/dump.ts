@@ -246,12 +246,8 @@ interface DumpedArticle {
 /**
  * Extract natural key from a single reference
  */
-function extractReferenceKey(ref: Reference | undefined): DumpedField {
-  const field: DumpedField = {
-    key: "",
-    type: "",
-    value: null,
-  };
+function extractReferenceKey(ref: Reference | undefined): Partial<DumpedField> {
+  const field: Partial<DumpedField> = {};
 
   if (!ref) return field;
 
@@ -291,6 +287,7 @@ function extractReferenceKey(ref: Reference | undefined): DumpedField {
         field.refFile = { url: ref.url };
       }
       break;
+    // TaxonomyValue and other types don't have natural keys - we keep them as GIDs
   }
 
   return field;
@@ -366,7 +363,7 @@ function transformMetaobjectField(field: MetaobjectField): DumpedField {
   }
 
   // List of references - for bulk operations, these come as JSON string in value
-  // For list reference types (e.g., "list.product_reference"), the value is a JSON array of GIDs
+  // For list reference types (e.g., "list.product_taxonomy_value_reference"), the value is a JSON array of GIDs
   // We store the raw value as-is since it will be used during apply
   // Note: For non-remappable types (like TaxonomyValue), the GID can be used directly
   if (

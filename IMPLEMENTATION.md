@@ -143,7 +143,7 @@
      - Report missing and extra resources
      - High-level presence/absence comparison
 
-1. **Files** (`packages/core/src/files/`) ✨ **COMPLETE**
+1. **Files** (`packages/core/src/files/`) ✨ **COMPLETE & IDEMPOTENT**
 
    - ✅ `dump.ts` - Export file library (110 lines): ✨ **NEW**
 
@@ -151,13 +151,18 @@
      - Capture URLs, alt text, mime types
      - Save to files.jsonl with metadata
 
-   - ✅ `apply.ts` - File upload with index building (230 lines): ✨ **UPDATED**
+   - ✅ `apply.ts` - **Idempotent** file upload with index building (340+ lines): ✨ **UPDATED**
 
+     - **Query existing destination files (by filename)** ✨ **NEW**
+     - **Update existing files if alt text changed** ✨ **NEW**
+     - **Skip files that are already correct** ✨ **NEW**
+     - Create new files only if they don't exist
      - Direct URL for CDN-hosted files
      - Staged upload for external files
-     - Download → Upload → Create file workflow
-     - **Build file index (source URL → destination GID mapping)** ✨ **NEW**
+     - **Track stats: uploaded, updated, skipped, failed** ✨ **NEW**
+     - Build file index (source URL → destination GID mapping)
      - Return index for reference relinking
+     - **100% idempotent - safe to re-run** ✨ **NEW**
 
    - ✅ `relink.ts` - File reference relinking (190 lines): ✨ **NEW**
      - Scan metaobjects/metafields for file references

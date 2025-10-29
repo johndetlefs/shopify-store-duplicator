@@ -120,14 +120,14 @@ npm run cli -- data:apply -i ./dumps
 **7-phase workflow:**
 
 1. Builds destination index (handles → GIDs)
-2. Uploads files and builds file index for relinking
+2. **Uploads files and builds file index for relinking** (idempotent - updates alt text if changed, skips unchanged files)
 3. Creates metaobjects with remapped references and relinked files
 4. Creates blogs
 5. Creates articles (linked to blogs)
 6. Creates pages with full HTML content
 7. Applies metafields to all resources (products, variants, collections, pages, blogs, articles, shop)
 
-Result: Complete data migration with all references pointing to correct destination resources.
+Result: Complete data migration with all references pointing to correct destination resources. **100% idempotent** - safe to re-run without creating duplicates.
 
 ### Step 5: Export & Import Menus
 

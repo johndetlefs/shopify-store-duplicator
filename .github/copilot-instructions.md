@@ -8,7 +8,7 @@
   - Variants → `{productHandle}:{sku}` (fallback to `{productHandle}:pos{position}` if SKU missing)
 - ✅ **Strict ordering** (7-phase apply workflow):
   1. Build destination index (handles → GIDs)
-  2. Upload files & build file index (URL/GID → destination GID)
+  2. Upload files & build file index (URL/GID → destination GID) - **IDEMPOTENT: queries existing files, updates if alt changed, skips unchanged**
   3. Apply metaobjects with file reference relinking
   4. Apply blogs (handle-based)
   5. Apply articles (composite key with blog lookup)
@@ -27,7 +27,7 @@
 - ✅ **Definitions (schema):** metaobject definitions + field definitions; metafield definitions (by owner type / namespace / key).
 - ✅ **Data (content):** metaobject _entries_, metafields on core resources (products, variants, collections, pages, articles, blogs, shop), menus, redirects.
 - ✅ **CMS content:** Pages, blogs, articles with full HTML content and metafields.
-- ✅ **Files:** Upload files to destination, build file index, automatically relink file references in metaobjects/metafields.
+- ✅ **Files:** Upload files to destination, build file index, automatically relink file references in metaobjects/metafields. **100% idempotent** - matches by filename, updates alt text if changed, skips unchanged files.
 - ✅ **Validation:** Diff commands for definitions and data to verify completeness.
 - **Non-goals:** orders, discounts, gift cards, analytics, customer data, theme code.
 

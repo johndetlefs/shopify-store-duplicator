@@ -3,7 +3,7 @@
  *
  * PURPOSE: Upload files from source URLs to destination store.
  * APPROACH: Use stagedUploadsCreate → PUT → fileCreate workflow.
- * IDEMPOTENCY: Track by original URL/filename to avoid duplicates.
+ * IDEMPOTENCY: Check existing files by filename; update if exists, create if not.
  * RELINKING: Returns source URL → destination GID mapping for reference updates.
  */
 
@@ -12,7 +12,12 @@ import * as path from "node:path";
 import { logger } from "../utils/logger.js";
 import { withBackoff } from "../utils/retry.js";
 import { type GraphQLClient } from "../graphql/client.js";
-import { STAGED_UPLOADS_CREATE, FILE_CREATE } from "../graphql/queries.js";
+import {
+  STAGED_UPLOADS_CREATE,
+  FILE_CREATE,
+  FILE_UPDATE,
+  FILES_QUERY,
+} from "../graphql/queries.js";
 import { type Result, ok, err, ShopifyApiError } from "../utils/types.js";
 
 export interface FileToUpload {
@@ -37,9 +42,143 @@ export interface FileIndex {
   gidToUrl: Map<string, string>;
 }
 
+export interface UploadStats {
+  total: number;
+  uploaded: number; // New files created
+  updated: number; // Existing files updated
+  skipped: number; // Unchanged files
+  failed: number;
+  errors: string[];
+}
+
+interface ExistingFile {
+  id: string;
+  alt?: string;
+  url: string;
+  filename: string;
+  fileStatus?: string;
+}
+
+/**
+ * Query all existing files from destination store.
+ * Builds a filename → file map for idempotent checking.
+ */
+async function queryExistingFiles(
+  client: GraphQLClient
+): Promise<Result<Map<string, ExistingFile>, Error>> {
+  logger.info("Querying existing files from destination...");
+
+  const existingFiles = new Map<string, ExistingFile>();
+  let hasNextPage = true;
+  let cursor: string | null = null;
+  let totalCount = 0;
+
+  while (hasNextPage) {
+    const variables = cursor ? { first: 250, after: cursor } : { first: 250 };
+
+    const response = await withBackoff(() =>
+      client.request({ query: FILES_QUERY, variables })
+    );
+
+    if (!response.ok) {
+      return err(new Error(`Failed to query files: ${response.error.message}`));
+    }
+
+    const data = response.data as {
+      files: {
+        edges: Array<{
+          node: {
+            id: string;
+            alt?: string;
+            fileStatus?: string;
+            image?: { url: string };
+            sources?: Array<{ url: string }>;
+            url?: string;
+          };
+        }>;
+        pageInfo: {
+          hasNextPage: boolean;
+          endCursor?: string;
+        };
+      };
+    };
+
+    for (const edge of data.files.edges) {
+      const node = edge.node;
+      const url = node.image?.url || node.sources?.[0]?.url || node.url || "";
+
+      if (url) {
+        const filename = extractFilename(url);
+        existingFiles.set(filename, {
+          id: node.id,
+          alt: node.alt,
+          url,
+          filename,
+          fileStatus: node.fileStatus,
+        });
+        totalCount++;
+      }
+    }
+
+    hasNextPage = data.files.pageInfo.hasNextPage;
+    cursor = data.files.pageInfo.endCursor || null;
+  }
+
+  logger.info(`Found ${totalCount} existing files in destination`);
+  return ok(existingFiles);
+}
+
+/**
+ * Update an existing file's metadata (alt text, etc).
+ */
+async function updateFile(
+  client: GraphQLClient,
+  update: { id: string; alt?: string }
+): Promise<Result<{ id: string; url: string }, ShopifyApiError>> {
+  const response = await withBackoff(() =>
+    client.request({
+      query: FILE_UPDATE,
+      variables: {
+        files: [update],
+      },
+    })
+  );
+
+  if (!response.ok) {
+    return err(response.error);
+  }
+
+  const data = response.data as {
+    fileUpdate: {
+      files: Array<{
+        id: string;
+        alt?: string;
+        image?: { url: string };
+        url?: string;
+      }>;
+      userErrors: Array<{ field: string[]; message: string }>;
+    };
+  };
+
+  if (data.fileUpdate.userErrors.length > 0) {
+    return err(
+      new ShopifyApiError(
+        data.fileUpdate.userErrors[0].message,
+        400,
+        response.data
+      )
+    );
+  }
+
+  const file = data.fileUpdate.files[0];
+  const url = file.image?.url || file.url || "";
+
+  return ok({ id: file.id, url });
+}
+
 /**
  * Apply files from dump to destination store.
- * Reads files.jsonl and uploads each file, building a mapping for relinking.
+ * Idempotent: checks existing files, updates if changed, creates if new.
  */
 export async function applyFiles(
   client: GraphQLClient,
@@ -58,10 +197,18 @@ export async function applyFiles(
     return ok(fileIndex);
   }
 
+  // Step 1: Query existing files from destination
+  const existingResult = await queryExistingFiles(client);
+  if (!existingResult.ok) {
+    return err(existingResult.error);
+  }
+  const existingFiles = existingResult.data;
+
+  // Step 2: Parse source files from dump
   const content = fs.readFileSync(inputFile, "utf-8");
   const lines = content.split("\n").filter((l) => l.trim());
 
-  const filesToUpload: Array<FileToUpload & { sourceId: string }> = [];
+  const filesToProcess: Array<FileToUpload & { sourceId: string }> = [];
 
   for (const line of lines) {
     try {
@@ -73,7 +220,7 @@ export async function applyFiles(
         mimeType?: string;
       };
 
-      filesToUpload.push({
+      filesToProcess.push({
         sourceId: file.id,
         url: file.url,
         filename: extractFilename(file.url),
@@ -85,52 +232,102 @@ export async function applyFiles(
     }
   }
 
-  logger.info(`Uploading ${filesToUpload.length} files...`);
+  logger.info(`Processing ${filesToProcess.length} files...`);
 
-  let uploaded = 0;
-  let failed = 0;
+  const stats: UploadStats = {
+    total: filesToProcess.length,
+    uploaded: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+    errors: [],
+  };
 
-  for (const file of filesToUpload) {
+  // Step 3: Process each file (create or update)
+  for (const file of filesToProcess) {
     try {
-      // Try direct URL first for CDN files
-      let result: Result<UploadedFile, ShopifyApiError>;
+      const existing = existingFiles.get(file.filename);
 
-      if (file.url.includes("cdn.shopify.com")) {
-        result = await createFileFromUrl(client, file);
-      } else {
-        result = await stagedUpload(client, file);
-      }
+      if (existing) {
+        // File exists - check if update needed
+        if (existing.alt !== file.alt) {
+          // Update alt text
+          const updateResult = await updateFile(client, {
+            id: existing.id,
+            alt: file.alt,
+          });
 
-      if (result.ok) {
-        // Build index for relinking
-        fileIndex.urlToGid.set(file.url, result.data.destinationId);
-        fileIndex.gidToGid.set(file.sourceId, result.data.destinationId);
-        if (result.data.destinationUrl) {
-          fileIndex.gidToUrl.set(file.sourceId, result.data.destinationUrl);
+          if (updateResult.ok) {
+            stats.updated++;
+            // Build index with existing file
+            fileIndex.urlToGid.set(file.url, existing.id);
+            fileIndex.gidToGid.set(file.sourceId, existing.id);
+            fileIndex.gidToUrl.set(file.sourceId, existing.url);
+
+            if (stats.updated % 10 === 0) {
+              logger.info(
+                `Updated ${stats.updated}/${filesToProcess.length} files`
+              );
+            }
+          } else {
+            stats.failed++;
+            stats.errors.push(
+              `Update ${file.filename}: ${updateResult.error.message}`
+            );
+          }
+        } else {
+          // No changes needed - skip
+          stats.skipped++;
+          // Build index with existing file
+          fileIndex.urlToGid.set(file.url, existing.id);
+          fileIndex.gidToGid.set(file.sourceId, existing.id);
+          fileIndex.gidToUrl.set(file.sourceId, existing.url);
         }
-        uploaded++;
-
-        if (uploaded % 10 === 0) {
-          logger.info(`Uploaded ${uploaded}/${filesToUpload.length} files`);
-        }
       } else {
-        failed++;
-        logger.warn(`Failed to upload ${file.filename}`, {
-          error: result.error.message,
-        });
+        // File doesn't exist - create it
+        let result: Result<UploadedFile, ShopifyApiError>;
+
+        if (file.url.includes("cdn.shopify.com")) {
+          result = await createFileFromUrl(client, file);
+        } else {
+          result = await stagedUpload(client, file);
+        }
+
+        if (result.ok) {
+          stats.uploaded++;
+          // Build index for relinking
+          fileIndex.urlToGid.set(file.url, result.data.destinationId);
+          fileIndex.gidToGid.set(file.sourceId, result.data.destinationId);
+          if (result.data.destinationUrl) {
+            fileIndex.gidToUrl.set(file.sourceId, result.data.destinationUrl);
+          }
+
+          if (stats.uploaded % 10 === 0) {
+            logger.info(
+              `Uploaded ${stats.uploaded}/${filesToProcess.length} files`
+            );
+          }
+        } else {
+          stats.failed++;
+          stats.errors.push(`Upload ${file.filename}: ${result.error.message}`);
+        }
       }
     } catch (error) {
-      failed++;
-      logger.warn(`Exception uploading ${file.filename}`, {
-        error: String(error),
-      });
+      stats.failed++;
+      stats.errors.push(`Exception ${file.filename}: ${String(error)}`);
     }
   }
 
-  logger.info(`✓ Uploaded ${uploaded} files (${failed} failed)`);
+  logger.info(
+    `✓ Files: ${stats.uploaded} uploaded, ${stats.updated} updated, ${stats.skipped} skipped, ${stats.failed} failed`
+  );
   logger.info(
     `Built file index: ${fileIndex.urlToGid.size} URL mappings, ${fileIndex.gidToGid.size} GID mappings`
   );
+
+  if (stats.errors.length > 0 && stats.errors.length <= 10) {
+    stats.errors.forEach((err) => logger.warn(err));
+  }
 
   return ok(fileIndex);
 }

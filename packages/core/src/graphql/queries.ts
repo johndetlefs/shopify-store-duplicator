@@ -515,6 +515,67 @@ export const FILE_CREATE = `
   }
 `;
 
+export const FILE_UPDATE = `
+  mutation fileUpdate($files: [FileUpdateInput!]!) {
+    fileUpdate(files: $files) {
+      files {
+        id
+        alt
+        ... on MediaImage {
+          image {
+            url
+          }
+        }
+        ... on GenericFile {
+          url
+        }
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+export const FILES_QUERY = `
+  query files($first: Int!, $after: String) {
+    files(first: $first, after: $after) {
+      edges {
+        node {
+          ... on MediaImage {
+            id
+            alt
+            fileStatus
+            image {
+              url
+            }
+          }
+          ... on Video {
+            id
+            alt
+            fileStatus
+            sources {
+              url
+            }
+          }
+          ... on GenericFile {
+            id
+            alt
+            fileStatus
+            url
+          }
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`;
+
 export const FILES_BULK = `
   {
     files {

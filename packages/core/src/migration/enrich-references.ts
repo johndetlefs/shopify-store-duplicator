@@ -439,6 +439,10 @@ function enrichObject(obj: any, mappings: GidMapping): any {
                 const fileUrl = mappings.files.get(gid);
                 if (fileUrl) entry.fileUrl = fileUrl;
                 break;
+              // For types without natural keys (e.g., TaxonomyValue), keep the GID
+              default:
+                entry.gid = gid;
+                break;
             }
 
             return entry;

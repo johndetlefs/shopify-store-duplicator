@@ -84,6 +84,7 @@ interface DumpedField {
     variantProductHandle?: string;
     collectionHandle?: string;
     pageHandle?: string;
+    gid?: string; // For types without natural keys (e.g., TaxonomyValue)
   }>;
 }
 
@@ -238,6 +239,9 @@ function remapReferenceList(
       gid = gidForCollectionHandle(index, ref.collectionHandle);
     } else if (ref.pageHandle) {
       gid = gidForPageHandle(index, ref.pageHandle);
+    } else if (ref.gid) {
+      // For types without natural keys (e.g., TaxonomyValue), use the GID directly
+      gid = ref.gid;
     }
 
     if (gid) {
@@ -409,7 +413,10 @@ async function applyMetaobjectsForType(
 
       for (const field of metaobj.fields) {
         const value = buildFieldValue(field, index);
-        fields.push({ key: field.key, value });
+        // Skip null values - let Shopify use defaults or leave empty
+        if (value !== null) {
+          fields.push({ key: field.key, value });
+        }
       }
 
       // Execute metaobjectUpsert mutation

@@ -64,6 +64,40 @@ function resolveWorkspacePath(path: string): string {
   return resolve(workspaceRoot, path);
 }
 
+/**
+ * Format statistics as a readable table
+ */
+function formatStatsTable(
+  title: string,
+  stats: {
+    total?: number;
+    created?: number;
+    updated?: number;
+    failed?: number;
+    uploaded?: number;
+    skipped?: number;
+  }
+): string {
+  const lines: string[] = [];
+  lines.push(`\n${title}:`);
+  lines.push("─".repeat(40));
+
+  if (stats.total !== undefined)
+    lines.push(`  Total:    ${stats.total.toString().padStart(6)}`);
+  if (stats.created !== undefined)
+    lines.push(`  Created:  ${stats.created.toString().padStart(6)}`);
+  if (stats.updated !== undefined)
+    lines.push(`  Updated:  ${stats.updated.toString().padStart(6)}`);
+  if (stats.uploaded !== undefined)
+    lines.push(`  Uploaded: ${stats.uploaded.toString().padStart(6)}`);
+  if (stats.skipped !== undefined)
+    lines.push(`  Skipped:  ${stats.skipped.toString().padStart(6)}`);
+  if (stats.failed !== undefined)
+    lines.push(`  Failed:   ${stats.failed.toString().padStart(6)}`);
+
+  return lines.join("\n");
+}
+
 const program = new Command();
 
 program
@@ -410,7 +444,42 @@ program
       failed: result.data.metafields.failed,
     };
 
-    logger.info("✓ Data apply complete", logData);
+    // Format and display summary as tables
+    logger.info("\n=== Data Apply Complete ===");
+
+    if (result.data.files.uploaded > 0 || result.data.files.failed > 0) {
+      console.log(formatStatsTable("Files", result.data.files));
+    }
+
+    if (result.data.metaobjects.total > 0) {
+      console.log(formatStatsTable("Metaobjects", result.data.metaobjects));
+    }
+
+    if (result.data.products && result.data.products.total > 0) {
+      console.log(formatStatsTable("Products", result.data.products));
+    }
+
+    if (result.data.collections && result.data.collections.total > 0) {
+      console.log(formatStatsTable("Collections", result.data.collections));
+    }
+
+    if (result.data.pages.total > 0) {
+      console.log(formatStatsTable("Pages", result.data.pages));
+    }
+
+    if (result.data.blogs.total > 0) {
+      console.log(formatStatsTable("Blogs", result.data.blogs));
+    }
+
+    if (result.data.articles.total > 0) {
+      console.log(formatStatsTable("Articles", result.data.articles));
+    }
+
+    if (result.data.metafields.total > 0) {
+      console.log(formatStatsTable("Metafields", result.data.metafields));
+    }
+
+    console.log("─".repeat(40) + "\n");
 
     // Report errors
     if (result.data.metaobjects.errors.length > 0) {
@@ -460,7 +529,8 @@ program
       result.data.metafields.failed;
     if (totalFailed > 0) {
       logger.warn(`${totalFailed} items failed to apply`);
-      process.exit(1);
+      // Don't exit with error - partial success is acceptable
+      // Individual errors are already logged with details
     }
   });
 

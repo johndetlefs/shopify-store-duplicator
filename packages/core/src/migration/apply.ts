@@ -34,6 +34,7 @@ import {
   PRODUCT_CREATE,
   PRODUCT_UPDATE,
   PRODUCT_VARIANT_BULK_CREATE,
+  PRODUCT_VARIANT_BULK_UPDATE,
   COLLECTION_CREATE,
   COLLECTION_UPDATE,
 } from "../graphql/queries.js";
@@ -1095,12 +1096,28 @@ export async function applyProducts(
   const content = fs.readFileSync(inputFile, "utf-8");
   const lines = content.split("\n").filter((l) => l.trim());
 
+  // Track products that need variant processing
+  const productsNeedingVariants: Array<{
+    product: DumpedProduct;
+    productId: string;
+  }> = [];
+
+  // Phase 1: Create/update all products (without variants)
   for (const line of lines) {
     stats.total++;
 
     try {
       const product = JSON.parse(line) as DumpedProduct;
       const existingProductGid = gidForProductHandle(index, product.handle);
+
+      // Ensure title is not null or empty - use handle as fallback
+      const productTitle =
+        product.title && product.title.trim()
+          ? product.title
+          : product.handle
+              .split("-")
+              .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+              .join(" ");
 
       if (existingProductGid) {
         // Product exists - update it
@@ -1109,7 +1126,7 @@ export async function applyProducts(
           variables: {
             product: {
               id: existingProductGid,
-              title: product.title,
+              title: productTitle,
               descriptionHtml: product.descriptionHtml || "",
               status: product.status || "ACTIVE",
             },
@@ -1143,10 +1160,26 @@ export async function applyProducts(
 
         stats.updated++;
         logger.debug(`✓ Updated product: ${product.handle}`);
+
+        // Queue variants for later processing (after index rebuild)
+        if (product.variants && product.variants.length > 0) {
+          const hasRealVariants =
+            product.variants.length > 1 ||
+            (product.variants[0] &&
+              product.variants[0].selectedOptions &&
+              product.variants[0].selectedOptions.length > 0);
+
+          if (hasRealVariants) {
+            productsNeedingVariants.push({
+              product,
+              productId: existingProductGid,
+            });
+          }
+        }
       } else {
         // Product doesn't exist - create it with options
         const productInput: any = {
-          title: product.title,
+          title: productTitle,
           handle: product.handle,
           descriptionHtml: product.descriptionHtml || "",
           status: product.status || "ACTIVE",
@@ -1213,9 +1246,8 @@ export async function applyProducts(
         stats.created++;
         logger.debug(`✓ Created product: ${product.handle}`);
 
-        // Create variants if there are any (skip if only default variant)
+        // Queue variants for later processing (after index rebuild)
         if (product.variants && product.variants.length > 0) {
-          // Check if this is just a default variant (no options)
           const hasRealVariants =
             product.variants.length > 1 ||
             (product.variants[0] &&
@@ -1223,81 +1255,10 @@ export async function applyProducts(
               product.variants[0].selectedOptions.length > 0);
 
           if (hasRealVariants) {
-            const variantInputs = product.variants.map((v) => {
-              const variantInput: any = {
-                price: v.price || "0.00",
-              };
-
-              // Add optional fields at variant level
-              if (v.compareAtPrice)
-                variantInput.compareAtPrice = v.compareAtPrice;
-              if (v.barcode) variantInput.barcode = v.barcode;
-              if (v.taxable !== undefined) variantInput.taxable = v.taxable;
-              if (v.inventoryPolicy)
-                variantInput.inventoryPolicy = v.inventoryPolicy;
-
-              // Build inventoryItem object for SKU, tracking, and weight
-              const inventoryItem: any = {};
-              if (v.sku) inventoryItem.sku = v.sku;
-              if (v.inventoryItem?.tracked !== undefined) {
-                inventoryItem.tracked = v.inventoryItem.tracked;
-              }
-              if (v.inventoryItem?.measurement?.weight) {
-                inventoryItem.measurement = {
-                  weight: {
-                    value: v.inventoryItem.measurement.weight.value,
-                    unit: v.inventoryItem.measurement.weight.unit.toUpperCase(),
-                  },
-                };
-              }
-              if (Object.keys(inventoryItem).length > 0) {
-                variantInput.inventoryItem = inventoryItem;
-              }
-
-              if (v.selectedOptions && v.selectedOptions.length > 0) {
-                variantInput.optionValues = v.selectedOptions.map((opt) => ({
-                  optionName: opt.name,
-                  name: opt.value,
-                }));
-              }
-
-              return variantInput;
+            productsNeedingVariants.push({
+              product,
+              productId: createdProductId,
             });
-
-            const variantResult = await client.request({
-              query: PRODUCT_VARIANT_BULK_CREATE,
-              variables: {
-                productId: createdProductId,
-                variants: variantInputs,
-              },
-            });
-
-            if (!variantResult.ok) {
-              logger.warn(
-                `Failed to create variants for product ${product.handle}`,
-                {
-                  error: variantResult.error.message,
-                }
-              );
-            } else {
-              const variantResponse =
-                variantResult.data.data?.productVariantsBulkCreate;
-              if (
-                variantResponse?.userErrors &&
-                variantResponse.userErrors.length > 0
-              ) {
-                logger.warn(
-                  `Variant creation user errors for ${product.handle}`,
-                  {
-                    errors: variantResponse.userErrors,
-                  }
-                );
-              } else {
-                logger.debug(
-                  `✓ Created ${product.variants.length} variants for ${product.handle}`
-                );
-              }
-            }
           }
         }
       }
@@ -1309,11 +1270,170 @@ export async function applyProducts(
     }
   }
 
-  logger.info(`✓ Applied ${stats.total} products`, {
-    created: stats.created,
-    updated: stats.updated,
-    failed: stats.failed,
-  });
+  logger.info(
+    `✓ Applied ${stats.total} products: ${stats.created} created, ${stats.updated} updated, ${stats.failed} failed`
+  );
+
+  // Phase 2: Rebuild index once and process all variants
+  if (productsNeedingVariants.length > 0) {
+    logger.info(
+      `Rebuilding index to process variants for ${productsNeedingVariants.length} products...`
+    );
+    index = await buildDestinationIndex(client);
+
+    logger.info(
+      `Processing variants for ${productsNeedingVariants.length} products...`
+    );
+    for (const { product, productId } of productsNeedingVariants) {
+      try {
+        const variantsToUpdate: any[] = [];
+        const variantsToCreate: any[] = [];
+
+        for (const v of product.variants) {
+          const variantInput: any = {
+            price: v.price || "0.00",
+          };
+
+          // Add optional fields at variant level
+          if (v.compareAtPrice) variantInput.compareAtPrice = v.compareAtPrice;
+          if (v.barcode) variantInput.barcode = v.barcode;
+          if (v.taxable !== undefined) variantInput.taxable = v.taxable;
+          if (v.inventoryPolicy)
+            variantInput.inventoryPolicy = v.inventoryPolicy;
+
+          // Build inventoryItem object for SKU, tracking, and weight
+          const inventoryItem: any = {};
+          if (v.sku) inventoryItem.sku = v.sku;
+          if (v.inventoryItem?.tracked !== undefined) {
+            inventoryItem.tracked = v.inventoryItem.tracked;
+          }
+          if (v.inventoryItem?.measurement?.weight) {
+            inventoryItem.measurement = {
+              weight: {
+                value: v.inventoryItem.measurement.weight.value,
+                unit: v.inventoryItem.measurement.weight.unit.toUpperCase(),
+              },
+            };
+          }
+          if (Object.keys(inventoryItem).length > 0) {
+            variantInput.inventoryItem = inventoryItem;
+          }
+
+          if (v.selectedOptions && v.selectedOptions.length > 0) {
+            variantInput.optionValues = v.selectedOptions.map((opt) => ({
+              optionName: opt.name,
+              name: opt.value,
+            }));
+          }
+
+          // Check if variant exists in destination
+          // Try both SKU and position keys since Shopify may auto-create variants without SKU
+          let existingVariantGid: string | undefined;
+          if (v.sku) {
+            existingVariantGid = gidForVariant(index, product.handle, v.sku);
+          }
+          if (!existingVariantGid && v.position) {
+            existingVariantGid = gidForVariant(
+              index,
+              product.handle,
+              `pos${v.position}`
+            );
+          }
+
+          if (existingVariantGid) {
+            // Variant exists - add to update list with ID
+            variantInput.id = existingVariantGid;
+            variantsToUpdate.push(variantInput);
+          } else {
+            // Variant doesn't exist - add to create list
+            variantsToCreate.push(variantInput);
+          }
+        }
+
+        // Update existing variants
+        if (variantsToUpdate.length > 0) {
+          const updateResult = await client.request({
+            query: PRODUCT_VARIANT_BULK_UPDATE,
+            variables: {
+              productId: productId,
+              variants: variantsToUpdate,
+            },
+          });
+
+          if (!updateResult.ok) {
+            logger.warn(
+              `Failed to update variants for product ${product.handle}`,
+              {
+                error: updateResult.error.message,
+              }
+            );
+          } else {
+            const updateResponse =
+              updateResult.data.data?.productVariantsBulkUpdate;
+            if (
+              updateResponse?.userErrors &&
+              updateResponse.userErrors.length > 0
+            ) {
+              logger.warn(`Variant update user errors for ${product.handle}`, {
+                errors: updateResponse.userErrors,
+              });
+            } else {
+              logger.debug(
+                `✓ Updated ${variantsToUpdate.length} variants for ${product.handle}`
+              );
+            }
+          }
+        }
+
+        // Create new variants
+        if (variantsToCreate.length > 0) {
+          const createResult = await client.request({
+            query: PRODUCT_VARIANT_BULK_CREATE,
+            variables: {
+              productId: productId,
+              variants: variantsToCreate,
+            },
+          });
+
+          if (!createResult.ok) {
+            logger.warn(
+              `Failed to create new variants for product ${product.handle}`,
+              {
+                error: createResult.error.message,
+              }
+            );
+          } else {
+            const createResponse =
+              createResult.data.data?.productVariantsBulkCreate;
+            if (
+              createResponse?.userErrors &&
+              createResponse.userErrors.length > 0
+            ) {
+              logger.warn(
+                `Variant creation user errors for ${product.handle}`,
+                {
+                  errors: createResponse.userErrors,
+                }
+              );
+            } else {
+              logger.debug(
+                `✓ Created ${variantsToCreate.length} new variants for ${product.handle}`
+              );
+            }
+          }
+        }
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        logger.warn(`Error processing variants for ${product.handle}`, {
+          error: errorMsg,
+        });
+      }
+    }
+
+    logger.info(
+      `✓ Processed variants for ${productsNeedingVariants.length} products`
+    );
+  }
 
   return ok(stats);
 }
@@ -1455,11 +1575,9 @@ export async function applyCollections(
     }
   }
 
-  logger.info(`✓ Applied ${stats.total} collections`, {
-    created: stats.created,
-    updated: stats.updated,
-    failed: stats.failed,
-  });
+  logger.info(
+    `✓ Applied ${stats.total} collections: ${stats.created} created, ${stats.updated} updated, ${stats.failed} failed`
+  );
 
   return ok(stats);
 }
@@ -2240,54 +2358,7 @@ export async function applyAllData(
     ? pagesResult.data
     : { total: 0, created: 0, updated: 0, skipped: 0, failed: 0, errors: [] };
 
-  logger.info("=== Data Apply Complete ===", {
-    files: {
-      uploaded: fileIndex.urlToGid.size,
-    },
-    metaobjects: {
-      total: metaobjectsData.total,
-      created: metaobjectsData.created,
-      failed: metaobjectsData.failed,
-    },
-    products: productsResult?.ok
-      ? {
-          total: productsResult.data.total,
-          created: productsResult.data.created,
-          failed: productsResult.data.failed,
-        }
-      : undefined,
-    collections: collectionsResult?.ok
-      ? {
-          total: collectionsResult.data.total,
-          created: collectionsResult.data.created,
-          failed: collectionsResult.data.failed,
-        }
-      : undefined,
-    blogs: {
-      total: blogsData.total,
-      created: blogsData.created,
-      updated: blogsData.updated,
-      failed: blogsData.failed,
-    },
-    articles: {
-      total: articlesData.total,
-      created: articlesData.created,
-      updated: articlesData.updated,
-      failed: articlesData.failed,
-    },
-    pages: {
-      total: pagesData.total,
-      created: pagesData.created,
-      updated: pagesData.updated,
-      failed: pagesData.failed,
-    },
-    metafields: {
-      total: aggregateMetafields.total,
-      created: aggregateMetafields.created,
-      failed: aggregateMetafields.failed,
-    },
-  });
-
+  // Data apply complete - stats will be displayed as tables in CLI
   return ok({
     files: {
       uploaded: fileIndex.urlToGid.size,

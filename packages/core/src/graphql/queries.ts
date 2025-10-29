@@ -1159,6 +1159,22 @@ export const PRODUCT_VARIANT_BULK_CREATE = `
   }
 `;
 
+export const PRODUCT_VARIANT_BULK_UPDATE = `
+  mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+    productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+      productVariants {
+        id
+        sku
+        price
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
 export const COLLECTION_CREATE = `
   mutation collectionCreate($input: CollectionInput!) {
     collectionCreate(input: $input) {

@@ -261,37 +261,6 @@ export const METAOBJECTS_BY_TYPE_BULK = (type: string) => `
                 url
               }
             }
-            references(first: 250) {
-              edges {
-                node {
-                  __typename
-                  ... on Metaobject {
-                    id
-                    type
-                    handle
-                  }
-                  ... on Product {
-                    id
-                    handle
-                  }
-                  ... on ProductVariant {
-                    id
-                    sku
-                    product {
-                      handle
-                    }
-                  }
-                  ... on Collection {
-                    id
-                    handle
-                  }
-                  ... on Page {
-                    id
-                    handle
-                  }
-                }
-              }
-            }
           }
         }
       }
@@ -741,7 +710,7 @@ export const ARTICLES_BULK = `
           id
           handle
           title
-          contentHtml
+          body
           blog {
             handle
           }

@@ -65,6 +65,9 @@ export async function runBulkQuery(
   const response = result.data.data?.bulkOperationRunQuery;
   if (response?.userErrors && response.userErrors.length > 0) {
     const errorMsg = response.userErrors.map((e: any) => e.message).join(", ");
+    logger.error("Bulk operation submission failed", {
+      errors: response.userErrors,
+    });
     return err(new ShopifyApiError(`Bulk operation failed: ${errorMsg}`));
   }
 
@@ -132,6 +135,11 @@ export async function pollBulkOperation(
     }
 
     if (operation.status === "FAILED") {
+      logger.error("Bulk operation failed", {
+        errorCode: operation.errorCode,
+        objectCount: operation.objectCount,
+        id: operation.id,
+      });
       return err(
         new ShopifyApiError(
           `Bulk operation failed: ${operation.errorCode || "Unknown error"}`

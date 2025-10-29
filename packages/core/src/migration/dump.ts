@@ -32,6 +32,7 @@ import { GraphQLClient } from "../graphql/client.js";
 import { logger } from "../utils/logger.js";
 import { err, type Result } from "../utils/types.js";
 import { dumpFiles } from "../files/dump.js";
+import { enrichAllReferences } from "./enrich-references.js";
 
 // ============================================================================
 // Types
@@ -124,7 +125,7 @@ interface ArticleNode {
   id: string;
   handle: string;
   title: string;
-  contentHtml?: string;
+  body?: string;
   blog: {
     handle: string;
   };
@@ -233,7 +234,7 @@ interface DumpedArticle {
   id: string;
   handle: string;
   title: string;
-  contentHtml?: string;
+  body?: string;
   blogHandle: string;
   metafields: DumpedMetafield[];
 }
@@ -327,6 +328,28 @@ function extractReferenceList(refs: Reference[]): DumpedField["refList"] {
 }
 
 /**
+ * Extract resource type from a Shopify GID
+ * e.g., "gid://shopify/Product/123" -> "Product"
+ */
+function extractGidType(gid: string): string {
+  const match = gid.match(/gid:\/\/shopify\/([^\/]+)\//);
+  return match ? match[1] : "Unknown";
+}
+
+/**
+ * Get typename from object - either from __typename field or extract from id
+ */
+function getTypename(obj: any): string {
+  if (obj.__typename) {
+    return obj.__typename;
+  }
+  if (obj.id) {
+    return extractGidType(obj.id);
+  }
+  return "Unknown";
+}
+
+/**
  * Transform metaobject field to dumped format with natural keys
  */
 function transformMetaobjectField(field: MetaobjectField): DumpedField {
@@ -342,9 +365,32 @@ function transformMetaobjectField(field: MetaobjectField): DumpedField {
     Object.assign(dumped, refKeys);
   }
 
-  // List of references
-  if (field.references && field.references.length > 0) {
-    dumped.refList = extractReferenceList(field.references);
+  // List of references - for bulk operations, these come as JSON string in value
+  // For list reference types (e.g., "list.product_reference"), the value is a JSON array of GIDs
+  // We store the raw value as-is since it will be used during apply
+  // Note: For non-remappable types (like TaxonomyValue), the GID can be used directly
+  if (
+    field.type.startsWith("list.") &&
+    field.type.includes("_reference") &&
+    field.value
+  ) {
+    try {
+      const gids = JSON.parse(field.value);
+      if (Array.isArray(gids)) {
+        // Extract types from GIDs for logging/debugging purposes
+        dumped.refList = gids.map((gid: string) => ({
+          type: extractGidType(gid),
+          gid: gid,
+        }));
+      }
+    } catch (e) {
+      logger.warn(
+        `Failed to parse list reference value for field ${field.key}`,
+        {
+          value: field.value?.substring(0, 100),
+        }
+      );
+    }
   }
 
   return dumped;
@@ -443,7 +489,11 @@ async function dumpMetaobjectsForType(
   const result = await runBulkQueryAndDownload(client, bulkQuery);
 
   if (!result.ok) {
-    logger.error(`Failed to dump metaobjects for type ${type}:`, result.error);
+    logger.error(`Failed to dump metaobjects for type ${type}:`, {
+      error: result.error.message,
+      status: result.error.status,
+      response: result.error.response,
+    });
     return { ok: false, error: result.error };
   }
 
@@ -512,6 +562,10 @@ export async function dumpMetaobjects(
 
 /**
  * Dump all products with variants and metafields
+ *
+ * Note: Shopify bulk operations return flattened JSONL where nested resources
+ * (variants, metafields) are separate objects with __parentId references.
+ * We need to reconstruct the hierarchical structure.
  */
 export async function dumpProducts(
   client: GraphQLClient,
@@ -525,39 +579,102 @@ export async function dumpProducts(
 
   const result = await runBulkQueryAndDownload(client, PRODUCTS_BULK);
   if (!result.ok) {
-    logger.error("Failed to dump products:", result.error);
+    logger.error("Failed to dump products:", {
+      error: result.error.message,
+      status: result.error.status,
+    });
     return { ok: false, error: result.error };
   }
 
-  // Parse JSONL stream
-  const transformed: DumpedProduct[] = [];
+  // Build hierarchical structure from flat JSONL
+  const productsMap = new Map<string, DumpedProduct>();
+  const variantsMap = new Map<string, DumpedVariant>();
+  const metafieldsByOwner = new Map<string, DumpedMetafield[]>();
 
   for await (const entry of result.data) {
     try {
-      const product = entry as ProductNode;
-      const dumped: DumpedProduct = {
-        id: product.id,
-        handle: product.handle,
-        title: product.title,
-        descriptionHtml: product.descriptionHtml,
-        status: product.status,
-        metafields:
-          product.metafields?.map((e) => transformMetafield(e.node)) || [],
-        variants:
-          product.variants?.map((e) => ({
-            id: e.node.id,
-            sku: e.node.sku,
-            title: e.node.title,
-            position: e.node.position,
-            metafields:
-              e.node.metafields?.map((mf) => transformMetafield(mf.node)) || [],
-          })) || [],
-      };
-      transformed.push(dumped);
+      const obj = entry as any;
+
+      // Determine object type from __typename or id pattern
+      const typename = getTypename(obj);
+      const parentId = obj.__parentId;
+
+      if (typename === "Product") {
+        // Top-level product
+        const product: DumpedProduct = {
+          id: obj.id,
+          handle: obj.handle,
+          title: obj.title,
+          descriptionHtml: obj.descriptionHtml,
+          status: obj.status,
+          metafields: [],
+          variants: [],
+        };
+        productsMap.set(obj.id, product);
+      } else if (typename === "ProductVariant") {
+        // Variant (child of product)
+        const variant: DumpedVariant = {
+          id: obj.id,
+          sku: obj.sku,
+          title: obj.title,
+          position: obj.position,
+          metafields: [],
+        };
+        variantsMap.set(obj.id, variant);
+
+        // Add to parent product if we've seen it
+        if (parentId) {
+          const product = productsMap.get(parentId);
+          if (product) {
+            product.variants.push(variant);
+          }
+        }
+      } else if (typename === "Metafield") {
+        // Metafield (child of product or variant)
+        const metafield: DumpedMetafield = {
+          namespace: obj.namespace,
+          key: obj.key,
+          value: obj.value,
+          type: obj.type,
+        };
+
+        // Handle reference if present
+        if (obj.reference) {
+          const refKeys = extractReferenceKey(obj.reference);
+          if (refKeys.refMetaobject)
+            metafield.refMetaobject = refKeys.refMetaobject;
+          if (refKeys.refProduct) metafield.refProduct = refKeys.refProduct;
+          if (refKeys.refCollection)
+            metafield.refCollection = refKeys.refCollection;
+        }
+
+        // Handle list references if present
+        if (obj.references?.edges) {
+          const refs = obj.references.edges.map((e: any) => e.node);
+          metafield.refList = extractReferenceList(refs);
+        }
+
+        // Add to parent (product or variant)
+        if (parentId) {
+          const product = productsMap.get(parentId);
+          const variant = variantsMap.get(parentId);
+
+          if (product) {
+            product.metafields.push(metafield);
+          } else if (variant) {
+            variant.metafields.push(metafield);
+          }
+        }
+      }
     } catch (err) {
-      logger.warn("Failed to parse product entry:", { error: String(err) });
+      logger.warn("Failed to parse product-related entry:", {
+        error: String(err),
+      });
     }
   }
+
+  // Convert to array
+  const transformed = Array.from(productsMap.values());
 
   // Write to file
   const outputFile = path.join(outputDir, "products.jsonl");
@@ -570,6 +687,9 @@ export async function dumpProducts(
 
 /**
  * Dump all collections with metafields
+ *
+ * Note: Shopify bulk operations return flattened JSONL where metafields
+ * are separate objects with __parentId references.
  */
 export async function dumpCollections(
   client: GraphQLClient,
@@ -583,29 +703,72 @@ export async function dumpCollections(
 
   const result = await runBulkQueryAndDownload(client, COLLECTIONS_BULK);
   if (!result.ok) {
-    logger.error("Failed to dump collections:", result.error);
+    logger.error("Failed to dump collections:", {
+      error: result.error.message,
+      status: result.error.status,
+    });
     return { ok: false, error: result.error };
   }
 
-  // Parse JSONL stream
-  const transformed: DumpedCollection[] = [];
+  // Build hierarchical structure from flat JSONL
+  const collectionsMap = new Map<string, DumpedCollection>();
 
   for await (const entry of result.data) {
     try {
-      const collection = entry as CollectionNode;
-      const dumped: DumpedCollection = {
-        id: collection.id,
-        handle: collection.handle,
-        title: collection.title,
-        descriptionHtml: collection.descriptionHtml,
-        metafields:
-          collection.metafields?.map((e) => transformMetafield(e.node)) || [],
-      };
-      transformed.push(dumped);
+      const obj = entry as any;
+      const typename = getTypename(obj);
+      const parentId = obj.__parentId;
+
+      if (typename === "Collection") {
+        // Top-level collection
+        const collection: DumpedCollection = {
+          id: obj.id,
+          handle: obj.handle,
+          title: obj.title,
+          descriptionHtml: obj.descriptionHtml,
+          metafields: [],
+        };
+        collectionsMap.set(obj.id, collection);
+      } else if (typename === "Metafield") {
+        // Metafield (child of collection)
+        const metafield: DumpedMetafield = {
+          namespace: obj.namespace,
+          key: obj.key,
+          value: obj.value,
+          type: obj.type,
+        };
+
+        // Handle reference if present
+        if (obj.reference) {
+          const refKeys = extractReferenceKey(obj.reference);
+          if (refKeys.refMetaobject)
+            metafield.refMetaobject = refKeys.refMetaobject;
+          if (refKeys.refProduct) metafield.refProduct = refKeys.refProduct;
+          if (refKeys.refCollection)
+            metafield.refCollection = refKeys.refCollection;
+        }
+
+        // Handle list references if present
+        if (obj.references?.edges) {
+          const refs = obj.references.edges.map((e: any) => e.node);
+          metafield.refList = extractReferenceList(refs);
+        }
+
+        // Add to parent collection
+        if (parentId) {
+          const collection = collectionsMap.get(parentId);
+          if (collection) {
+            collection.metafields.push(metafield);
+          }
+        }
+      }
     } catch (err) {
       logger.warn("Failed to parse collection entry:", { error: String(err) });
     }
   }
+
+  // Convert to array
+  const transformed = Array.from(collectionsMap.values());
 
   // Write to file
   const outputFile = path.join(outputDir, "collections.jsonl");
@@ -618,6 +781,8 @@ export async function dumpCollections(
 
 /**
  * Dump all pages with metafields
+ *
+ * Note: Shopify bulk operations return flattened JSONL.
  */
 export async function dumpPages(
   client: GraphQLClient,
@@ -631,30 +796,67 @@ export async function dumpPages(
 
   const result = await runBulkQueryAndDownload(client, PAGES_BULK);
   if (!result.ok) {
-    logger.error("Failed to dump pages:", result.error);
+    logger.error("Failed to dump pages:", {
+      error: result.error.message,
+      status: result.error.status,
+    });
     return { ok: false, error: result.error };
   }
 
-  // Parse JSONL stream
-  const transformed: DumpedPage[] = [];
+  // Build hierarchical structure from flat JSONL
+  const pagesMap = new Map<string, DumpedPage>();
 
   for await (const entry of result.data) {
     try {
-      const page = entry as PageNode;
-      const dumped: DumpedPage = {
-        id: page.id,
-        handle: page.handle,
-        title: page.title,
-        body: page.body,
-        bodySummary: page.bodySummary,
-        metafields:
-          page.metafields?.map((e) => transformMetafield(e.node)) || [],
-      };
-      transformed.push(dumped);
+      const obj = entry as any;
+      const typename = getTypename(obj);
+      const parentId = obj.__parentId;
+
+      if (typename === "Page" || typename === "OnlineStorePage") {
+        // Top-level page
+        const page: DumpedPage = {
+          id: obj.id,
+          handle: obj.handle,
+          title: obj.title,
+          body: obj.body,
+          bodySummary: obj.bodySummary,
+          metafields: [],
+        };
+        pagesMap.set(obj.id, page);
+      } else if (typename === "Metafield") {
+        // Metafield (child of page)
+        const metafield: DumpedMetafield = {
+          namespace: obj.namespace,
+          key: obj.key,
+          value: obj.value,
+          type: obj.type,
+        };
+
+        // Handle reference if present
+        if (obj.reference) {
+          const refKeys = extractReferenceKey(obj.reference);
+          if (refKeys.refMetaobject)
+            metafield.refMetaobject = refKeys.refMetaobject;
+          if (refKeys.refProduct) metafield.refProduct = refKeys.refProduct;
+          if (refKeys.refCollection)
+            metafield.refCollection = refKeys.refCollection;
+        }
+
+        // Add to parent page
+        if (parentId) {
+          const page = pagesMap.get(parentId);
+          if (page) {
+            page.metafields.push(metafield);
+          }
+        }
+      }
     } catch (err) {
       logger.warn("Failed to parse page entry:", { error: String(err) });
     }
   }
+
+  // Convert to array
+  const transformed = Array.from(pagesMap.values());
 
   // Write to file
   const outputFile = path.join(outputDir, "pages.jsonl");
@@ -667,6 +869,8 @@ export async function dumpPages(
 
 /**
  * Dump shop-level metafields
+ *
+ * Note: Shopify bulk operations return flattened JSONL.
  */
 export async function dumpShopMetafields(
   client: GraphQLClient,
@@ -680,23 +884,50 @@ export async function dumpShopMetafields(
 
   const result = await runBulkQueryAndDownload(client, SHOP_BULK);
   if (!result.ok) {
-    logger.error("Failed to dump shop metafields:", result.error);
+    logger.error("Failed to dump shop metafields:", {
+      error: result.error.message,
+      status: result.error.status,
+    });
     return { ok: false, error: result.error };
   }
 
-  // Parse JSONL stream - shop is returned as a single object
-  let shopMetafields: DumpedMetafield[] = [];
+  // Parse JSONL stream - shop and metafields are flattened
+  const shopMetafields: DumpedMetafield[] = [];
+  let shopId: string | undefined;
 
   for await (const entry of result.data) {
     try {
-      // The bulk query returns the shop object
-      const shop = entry as {
-        id: string;
-        name: string;
-        metafields?: MetafieldEdge[];
-      };
-      if (shop.metafields) {
-        shopMetafields = shop.metafields.map((e) => transformMetafield(e.node));
+      const obj = entry as any;
+      const typename = getTypename(obj);
+      const parentId = obj.__parentId;
+
+      if (typename === "Shop") {
+        shopId = obj.id;
+      } else if (typename === "Metafield") {
+        const metafield: DumpedMetafield = {
+          namespace: obj.namespace,
+          key: obj.key,
+          value: obj.value,
+          type: obj.type,
+        };
+
+        // Handle reference if present
+        if (obj.reference) {
+          const refKeys = extractReferenceKey(obj.reference);
+          if (refKeys.refMetaobject)
+            metafield.refMetaobject = refKeys.refMetaobject;
+          if (refKeys.refProduct) metafield.refProduct = refKeys.refProduct;
+          if (refKeys.refCollection)
+            metafield.refCollection = refKeys.refCollection;
+        }
+
+        // Handle list references if present
+        if (obj.references?.edges) {
+          const refs = obj.references.edges.map((e: any) => e.node);
+          metafield.refList = extractReferenceList(refs);
+        }
+
+        shopMetafields.push(metafield);
       }
     } catch (err) {
       logger.warn("Failed to parse shop entry:", { error: String(err) });
@@ -716,6 +947,8 @@ export async function dumpShopMetafields(
 
 /**
  * Dump all blogs with metafields
+ *
+ * Note: Shopify bulk operations return flattened JSONL.
  */
 export async function dumpBlogs(
   client: GraphQLClient,
@@ -729,28 +962,71 @@ export async function dumpBlogs(
 
   const result = await runBulkQueryAndDownload(client, BLOGS_BULK);
   if (!result.ok) {
-    logger.error("Failed to dump blogs:", result.error);
+    logger.error("Failed to dump blogs:", {
+      error: result.error.message,
+      status: result.error.status,
+    });
     return { ok: false, error: result.error };
   }
 
-  // Parse JSONL stream
-  const transformed: DumpedBlog[] = [];
+  // Build hierarchical structure from flat JSONL
+  const blogsMap = new Map<string, DumpedBlog>();
 
   for await (const entry of result.data) {
     try {
-      const blog = entry as BlogNode;
-      const dumped: DumpedBlog = {
-        id: blog.id,
-        handle: blog.handle,
-        title: blog.title,
-        metafields:
-          blog.metafields?.map((e) => transformMetafield(e.node)) || [],
-      };
-      transformed.push(dumped);
+      const obj = entry as any;
+      const typename = getTypename(obj);
+      const parentId = obj.__parentId;
+
+      if (typename === "Blog" || typename === "OnlineStoreBlog") {
+        // Top-level blog
+        const blog: DumpedBlog = {
+          id: obj.id,
+          handle: obj.handle,
+          title: obj.title,
+          metafields: [],
+        };
+        blogsMap.set(obj.id, blog);
+      } else if (typename === "Metafield") {
+        // Metafield (child of blog)
+        const metafield: DumpedMetafield = {
+          namespace: obj.namespace,
+          key: obj.key,
+          value: obj.value,
+          type: obj.type,
+        };
+
+        // Handle reference if present
+        if (obj.reference) {
+          const refKeys = extractReferenceKey(obj.reference);
+          if (refKeys.refMetaobject)
+            metafield.refMetaobject = refKeys.refMetaobject;
+          if (refKeys.refProduct) metafield.refProduct = refKeys.refProduct;
+          if (refKeys.refCollection)
+            metafield.refCollection = refKeys.refCollection;
+        }
+
+        // Handle list references if present
+        if (obj.references?.edges) {
+          const refs = obj.references.edges.map((e: any) => e.node);
+          metafield.refList = extractReferenceList(refs);
+        }
+
+        // Add to parent blog
+        if (parentId) {
+          const blog = blogsMap.get(parentId);
+          if (blog) {
+            blog.metafields.push(metafield);
+          }
+        }
+      }
     } catch (err) {
       logger.warn("Failed to parse blog entry:", { error: String(err) });
     }
   }
+
+  // Convert to array
+  const transformed = Array.from(blogsMap.values());
 
   // Write to file
   const outputFile = path.join(outputDir, "blogs.jsonl");
@@ -763,6 +1039,8 @@ export async function dumpBlogs(
 
 /**
  * Dump all articles with metafields
+ *
+ * Note: Shopify bulk operations return flattened JSONL.
  */
 export async function dumpArticles(
   client: GraphQLClient,
@@ -776,30 +1054,87 @@ export async function dumpArticles(
 
   const result = await runBulkQueryAndDownload(client, ARTICLES_BULK);
   if (!result.ok) {
-    logger.error("Failed to dump articles:", result.error);
+    logger.error("Failed to dump articles:", {
+      error: result.error.message,
+      status: result.error.status,
+    });
     return { ok: false, error: result.error };
   }
 
-  // Parse JSONL stream
-  const transformed: DumpedArticle[] = [];
+  // Build hierarchical structure from flat JSONL
+  const articlesMap = new Map<string, DumpedArticle>();
+  const blogReferences = new Map<string, string>(); // article ID -> blog handle
 
   for await (const entry of result.data) {
     try {
-      const article = entry as ArticleNode;
-      const dumped: DumpedArticle = {
-        id: article.id,
-        handle: article.handle,
-        title: article.title,
-        contentHtml: article.contentHtml,
-        blogHandle: article.blog.handle,
-        metafields:
-          article.metafields?.map((e) => transformMetafield(e.node)) || [],
-      };
-      transformed.push(dumped);
+      const obj = entry as any;
+      const typename = getTypename(obj);
+      const parentId = obj.__parentId;
+
+      if (typename === "Article" || typename === "OnlineStoreArticle") {
+        // Top-level article
+        const article: DumpedArticle = {
+          id: obj.id,
+          handle: obj.handle,
+          title: obj.title,
+          body: obj.body,
+          blogHandle: obj.blog?.handle || "",
+          metafields: [],
+        };
+        articlesMap.set(obj.id, article);
+      } else if (typename === "Blog" || typename === "OnlineStoreBlog") {
+        // Blog referenced by article (as __parentId)
+        if (parentId) {
+          blogReferences.set(parentId, obj.handle);
+        }
+      } else if (typename === "Metafield") {
+        // Metafield (child of article)
+        const metafield: DumpedMetafield = {
+          namespace: obj.namespace,
+          key: obj.key,
+          value: obj.value,
+          type: obj.type,
+        };
+
+        // Handle reference if present
+        if (obj.reference) {
+          const refKeys = extractReferenceKey(obj.reference);
+          if (refKeys.refMetaobject)
+            metafield.refMetaobject = refKeys.refMetaobject;
+          if (refKeys.refProduct) metafield.refProduct = refKeys.refProduct;
+          if (refKeys.refCollection)
+            metafield.refCollection = refKeys.refCollection;
+        }
+
+        // Handle list references if present
+        if (obj.references?.edges) {
+          const refs = obj.references.edges.map((e: any) => e.node);
+          metafield.refList = extractReferenceList(refs);
+        }
+
+        // Add to parent article
+        if (parentId) {
+          const article = articlesMap.get(parentId);
+          if (article) {
+            article.metafields.push(metafield);
+          }
+        }
+      }
     } catch (err) {
       logger.warn("Failed to parse article entry:", { error: String(err) });
     }
   }
+
+  // Update blog handles from references if needed
+  for (const [articleId, blogHandle] of blogReferences) {
+    const article = articlesMap.get(articleId);
+    if (article && !article.blogHandle) {
+      article.blogHandle = blogHandle;
+    }
+  }
+
+  // Convert to array
+  const transformed = Array.from(articlesMap.values());
 
   // Write to file
   const outputFile = path.join(outputDir, "articles.jsonl");
@@ -859,6 +1194,14 @@ export async function dumpAllData(
   const articlesResult = await dumpArticles(client, outputDir);
   if (!articlesResult.ok) {
     logger.warn("Articles dump failed, continuing...");
+  }
+
+  // Enrich all references with natural keys (post-processing step)
+  logger.info("=== Enriching References ===");
+  const enrichResult = await enrichAllReferences(outputDir);
+  if (!enrichResult.ok) {
+    logger.error("Reference enrichment failed:", enrichResult.error);
+    return enrichResult;
   }
 
   logger.info("=== Data Dump Complete ===");

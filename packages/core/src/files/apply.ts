@@ -84,24 +84,28 @@ async function queryExistingFiles(
       return err(new Error(`Failed to query files: ${response.error.message}`));
     }
 
-    const data = response.data as {
-      files: {
-        edges: Array<{
-          node: {
-            id: string;
-            alt?: string;
-            fileStatus?: string;
-            image?: { url: string };
-            sources?: Array<{ url: string }>;
-            url?: string;
+    const responseData = response.data as {
+      data: {
+        files: {
+          edges: Array<{
+            node: {
+              id: string;
+              alt?: string;
+              fileStatus?: string;
+              image?: { url: string };
+              sources?: Array<{ url: string }>;
+              url?: string;
+            };
+          }>;
+          pageInfo: {
+            hasNextPage: boolean;
+            endCursor?: string;
           };
-        }>;
-        pageInfo: {
-          hasNextPage: boolean;
-          endCursor?: string;
         };
       };
     };
+
+    const data = responseData.data;
 
     for (const edge of data.files.edges) {
       const node = edge.node;
@@ -148,17 +152,21 @@ async function updateFile(
     return err(response.error);
   }
 
-  const data = response.data as {
-    fileUpdate: {
-      files: Array<{
-        id: string;
-        alt?: string;
-        image?: { url: string };
-        url?: string;
-      }>;
-      userErrors: Array<{ field: string[]; message: string }>;
+  const responseData = response.data as {
+    data: {
+      fileUpdate: {
+        files: Array<{
+          id: string;
+          alt?: string;
+          image?: { url: string };
+          url?: string;
+        }>;
+        userErrors: Array<{ field: string[]; message: string }>;
+      };
     };
   };
+
+  const data = responseData.data;
 
   if (data.fileUpdate.userErrors.length > 0) {
     return err(

@@ -1368,16 +1368,22 @@ export async function applyArticles(
 
       if (existingGid) {
         // Article exists - update it
+        const articleInput: any = {
+          title: article.title,
+          body: article.body || "",
+          tags: article.tags || [],
+        };
+
+        // Author is an object with a name property
+        if (article.author) {
+          articleInput.author = { name: article.author };
+        }
+
         const result = await client.request({
           query: ARTICLE_UPDATE,
           variables: {
             id: existingGid,
-            article: {
-              title: article.title,
-              body: article.body || "",
-              author: article.author,
-              tags: article.tags || [],
-            },
+            article: articleInput,
           },
         });
 
@@ -1421,18 +1427,21 @@ export async function applyArticles(
         );
       } else {
         // Article doesn't exist - create it
+        const articleInput: any = {
+          blogId: blogGid,
+          title: article.title,
+          handle: article.handle,
+          body: article.body || "",
+          // Author is required - use stored value or default to "Staff"
+          author: article.author ? { name: article.author } : { name: "Staff" },
+          tags: article.tags || [],
+          publishedAt: article.publishedAt,
+        };
+
         const result = await client.request({
           query: ARTICLE_CREATE,
           variables: {
-            article: {
-              blogId: blogGid,
-              title: article.title,
-              handle: article.handle,
-              body: article.body || "",
-              author: article.author,
-              tags: article.tags || [],
-              publishedAt: article.publishedAt,
-            },
+            article: articleInput,
           },
         });
 

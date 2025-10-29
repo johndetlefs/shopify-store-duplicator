@@ -39,7 +39,7 @@ export interface ApplyResult {
 async function applyMetaobjectDefinition(
   client: GraphQLClient,
   def: MetaobjectDefinition,
-  existingTypes: Set<string>
+  existingTypes: Map<string, string>
 ): Promise<{
   success: boolean;
   action: "created" | "updated" | "skipped";
@@ -105,13 +105,96 @@ async function applyMetaobjectDefinition(
 }
 
 /**
+ * Check if a metafield namespace is reserved by Shopify.
+ * Reserved namespaces include:
+ * - shopify--* (system-managed features)
+ * - shopify (exact match - system namespace)
+ * - reviews (exact match - reviews app)
+ * These cannot be created via API.
+ */
+function isReservedMetafieldNamespace(namespace: string, key: string): boolean {
+  // Shopify system namespaces (with double dash or exact match)
+  if (namespace.startsWith("shopify--") || namespace === "shopify") {
+    return true;
+  }
+
+  // Reviews app namespace
+  if (namespace === "reviews") {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Build a mapping from source metaobject definition GIDs to their types.
+ * This is needed to remap metafield validation constraints.
+ */
+function buildSourceMetaobjectGidToType(
+  sourceDefinitions: MetaobjectDefinition[]
+): Map<string, string> {
+  const gidToType = new Map<string, string>();
+  for (const def of sourceDefinitions) {
+    if (def.id) {
+      gidToType.set(def.id, def.type);
+    }
+  }
+  return gidToType;
+}
+
+/**
+ * Remap metaobject definition GID validations from source to destination.
+ * Returns new validations array with remapped GIDs.
+ */
+function remapMetaobjectValidations(
+  validations: Array<{ name: string; value: string }> | undefined,
+  sourceGidToType: Map<string, string>,
+  destTypeToGid: Map<string, string>
+): Array<{ name: string; value: string }> | undefined {
+  if (!validations || validations.length === 0) {
+    return validations;
+  }
+
+  return validations.map((v) => {
+    if (v.name === "metaobject_definition_id") {
+      // This is a metaobject reference validation - need to remap the GID
+      const sourceGid = v.value;
+      const sourceType = sourceGidToType.get(sourceGid);
+
+      if (!sourceType) {
+        logger.warn(
+          `Cannot remap metaobject validation: source type not found for GID ${sourceGid}`
+        );
+        return v;
+      }
+
+      const destGid = destTypeToGid.get(sourceType);
+
+      if (!destGid) {
+        logger.warn(
+          `Cannot remap metaobject validation: destination GID not found for type ${sourceType}`
+        );
+        return v;
+      }
+
+      return { name: v.name, value: destGid };
+    }
+
+    // Other validations pass through unchanged
+    return v;
+  });
+}
+
+/**
  * Apply a single metafield definition to destination.
  * Creates if missing; skips if exists (to avoid type conflicts).
  */
 async function applyMetafieldDefinition(
   client: GraphQLClient,
   def: MetafieldDefinition,
-  existingKeys: Set<string>
+  existingKeys: Set<string>,
+  sourceGidToType: Map<string, string>,
+  destTypeToGid: Map<string, string>
 ): Promise<{
   success: boolean;
   action: "created" | "updated" | "skipped";
@@ -127,6 +210,13 @@ async function applyMetafieldDefinition(
         `Creating metafield definition: ${def.namespace}.${def.key} (${def.ownerType})`
       );
 
+      // Remap metaobject definition GIDs in validations
+      const remappedValidations = remapMetaobjectValidations(
+        def.validations,
+        sourceGidToType,
+        destTypeToGid
+      );
+
       const input = {
         name: def.name,
         namespace: def.namespace,
@@ -134,11 +224,15 @@ async function applyMetafieldDefinition(
         description: def.description,
         type: def.type.name,
         ownerType: def.ownerType,
-        validations: def.validations?.map((v) => ({
+        validations: remappedValidations?.map((v) => ({
           name: v.name,
           value: v.value,
         })),
-        pin: def.pinnedPosition !== undefined ? def.pinnedPosition : undefined,
+        // Convert pinnedPosition number to boolean pin field
+        pin:
+          def.pinnedPosition !== null && def.pinnedPosition !== undefined
+            ? true
+            : undefined,
       };
 
       const result = await client.request({
@@ -176,12 +270,12 @@ async function applyMetafieldDefinition(
 }
 
 /**
- * Get existing metaobject definition types from destination.
+ * Get existing metaobject definition types and their GIDs from destination.
  */
 async function getExistingMetaobjectTypes(
   client: GraphQLClient
-): Promise<Set<string>> {
-  const types = new Set<string>();
+): Promise<Map<string, string>> {
+  const typeToGid = new Map<string, string>();
 
   try {
     for await (const def of client.paginate(
@@ -189,6 +283,7 @@ async function getExistingMetaobjectTypes(
         metaobjectDefinitions(first: $first, after: $after) {
           edges {
             node {
+              id
               type
             }
             cursor
@@ -205,7 +300,7 @@ async function getExistingMetaobjectTypes(
         getPageInfo: (data) => data.metaobjectDefinitions.pageInfo,
       }
     )) {
-      types.add(def.type);
+      typeToGid.set(def.type, def.id);
     }
   } catch (error: any) {
     logger.warn("Failed to fetch existing metaobject types", {
@@ -213,7 +308,7 @@ async function getExistingMetaobjectTypes(
     });
   }
 
-  return types;
+  return typeToGid;
 }
 
 /**
@@ -273,13 +368,40 @@ async function getExistingMetafieldKeys(
 }
 
 /**
+ * Check if a metaobject type is reserved by Shopify.
+ * Reserved types start with "shopify--" and cannot be created via API.
+ */
+function isReservedMetaobjectType(type: string): boolean {
+  return type.startsWith("shopify--");
+}
+
+/**
  * Apply all metaobject definitions to destination store.
  */
 export async function applyMetaobjectDefinitions(
   client: GraphQLClient,
   definitions: MetaobjectDefinition[]
 ): Promise<Result<ApplyResult, ShopifyApiError>> {
-  logger.info(`Applying ${definitions.length} metaobject definitions`);
+  // Filter out reserved types
+  const customDefinitions = definitions.filter(
+    (def) => !isReservedMetaobjectType(def.type)
+  );
+  const reservedCount = definitions.length - customDefinitions.length;
+
+  if (reservedCount > 0) {
+    logger.info(
+      `Skipping ${reservedCount} reserved metaobject definitions (shopify--*)`,
+      {
+        reserved: definitions
+          .filter((d) => isReservedMetaobjectType(d.type))
+          .map((d) => d.type),
+      }
+    );
+  }
+
+  logger.info(
+    `Applying ${customDefinitions.length} custom metaobject definitions`
+  );
 
   const result: ApplyResult = {
     created: 0,
@@ -294,7 +416,7 @@ export async function applyMetaobjectDefinitions(
   logger.debug(`Found ${existingTypes.size} existing metaobject types`);
 
   // Apply each definition
-  for (const def of definitions) {
+  for (const def of customDefinitions) {
     const applyResult = await applyMetaobjectDefinition(
       client,
       def,
@@ -323,9 +445,29 @@ export async function applyMetaobjectDefinitions(
  */
 export async function applyMetafieldDefinitions(
   client: GraphQLClient,
-  definitions: MetafieldDefinition[]
+  definitions: MetafieldDefinition[],
+  sourceMetaobjectDefinitions: MetaobjectDefinition[]
 ): Promise<Result<ApplyResult, ShopifyApiError>> {
-  logger.info(`Applying ${definitions.length} metafield definitions`);
+  // Filter out reserved namespaces
+  const customDefinitions = definitions.filter(
+    (def) => !isReservedMetafieldNamespace(def.namespace, def.key)
+  );
+  const reservedCount = definitions.length - customDefinitions.length;
+
+  if (reservedCount > 0) {
+    logger.info(
+      `Skipping ${reservedCount} reserved metafield definitions (shopify--*, shopify.*, reviews.*)`,
+      {
+        reserved: definitions
+          .filter((d) => isReservedMetafieldNamespace(d.namespace, d.key))
+          .map((d) => `${d.ownerType}:${d.namespace}.${d.key}`),
+      }
+    );
+  }
+
+  logger.info(
+    `Applying ${customDefinitions.length} custom metafield definitions`
+  );
 
   const result: ApplyResult = {
     created: 0,
@@ -339,12 +481,20 @@ export async function applyMetafieldDefinitions(
   const existingKeys = await getExistingMetafieldKeys(client);
   logger.debug(`Found ${existingKeys.size} existing metafield definitions`);
 
+  // Build metaobject GID mappings for validation remapping
+  const sourceGidToType = buildSourceMetaobjectGidToType(
+    sourceMetaobjectDefinitions
+  );
+  const destTypeToGid = await getExistingMetaobjectTypes(client);
+
   // Apply each definition
-  for (const def of definitions) {
+  for (const def of customDefinitions) {
     const applyResult = await applyMetafieldDefinition(
       client,
       def,
-      existingKeys
+      existingKeys,
+      sourceGidToType,
+      destTypeToGid
     );
 
     if (applyResult.success) {
@@ -384,10 +534,11 @@ export async function applyDefinitions(
     return err(metaobjectResult.error);
   }
 
-  // Then apply metafield definitions
+  // Then apply metafield definitions (pass source metaobject defs for GID remapping)
   const metafieldResult = await applyMetafieldDefinitions(
     client,
-    dump.metafieldDefinitions
+    dump.metafieldDefinitions,
+    dump.metaobjectDefinitions
   );
   if (!metafieldResult.ok) {
     return err(metafieldResult.error);

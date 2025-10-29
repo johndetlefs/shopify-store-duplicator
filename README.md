@@ -233,6 +233,20 @@ npm run cli -- redirects:dump -o <file>   # Export redirects
 npm run cli -- redirects:apply -f <file>  # Import redirects
 ```
 
+### Data Cleanup (Destructive)
+
+```bash
+npm run cli -- data:drop --files-only     # Delete all files from destination
+
+# ⚠️ WARNING: Destructive operation!
+# - Requires interactive confirmation (type "delete")
+# - Only files deletion is currently implemented
+# - Use for testing or cleaning up before re-migration
+
+# Future options (not yet implemented):
+# --products-only, --collections-only, --metaobjects-only
+```
+
 ### Global Options
 
 Available for all commands:
@@ -370,7 +384,8 @@ npm run clean
 
 - **SETUP.md** - Detailed installation and configuration guide
 - **QUICK_REFERENCE.md** - Command cheat sheet
-- **IMPLEMENTATION.md** - Technical implementation details
+- **IMPLEMENTATION.md** - Technical implementation details and roadmap
+- **docs/IDEMPOTENT_FILES.md** - File idempotency implementation guide
 - **.github/copilot-instructions.md** - AI coding assistant instructions
 
 ## Security
@@ -383,12 +398,24 @@ npm run clean
 
 ## Contributing
 
-This is a complete, production-ready tool. Future enhancements could include:
+**Status: 100% Feature Complete - Production Ready!**
 
-- Progress bars for long operations
+All core features for store duplication have been implemented:
+
+- ✅ All resource types (metaobjects, products, collections, pages, blogs, articles, files, menus, redirects)
+- ✅ Complete reference remapping with natural keys
+- ✅ 100% idempotent operations (files, metaobjects, metafields, CMS content)
+- ✅ Validation tools (diff commands)
+- ✅ Error handling and comprehensive logging
+
+**Optional future enhancements** could include:
+
+- Visual progress bars for long operations
 - Parallel bulk queries for faster dumps
-- Selective apply (cherry-pick resources)
-- HTML/CSV diff reports
+- Pre-flight validation and compatibility checks
+- HTML/CSV diff reports and dashboards
+- Unit and integration testing
+- Performance optimizations for very large stores (>50k products)
 
 ## Support
 

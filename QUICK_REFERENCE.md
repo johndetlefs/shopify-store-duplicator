@@ -65,6 +65,17 @@ npm run cli -- redirects:dump -o redirects.json # Export
 npm run cli -- redirects:apply -f redirects.json # Import
 ```
 
+### Data Cleanup (Destructive)
+
+```bash
+npm run cli -- data:drop --files-only           # Delete all files from destination
+# ⚠️ WARNING: Destructive operation! Requires interactive confirmation.
+# Other options (NOT YET IMPLEMENTED):
+#   --products-only
+#   --collections-only
+#   --metaobjects-only
+```
+
 ## Global Options
 
 All commands support:
@@ -96,9 +107,11 @@ npm run cli -- defs:apply -f defs.json --dry-run --verbose
 ✅ Blogs (with metafields)  
 ✅ Articles (content + metafields)  
 ✅ Shop metafields  
-✅ Files (media library + auto-relinking)  
+✅ Files (media library + auto-relinking, **100% idempotent**)  
 ✅ Navigation menus (with URL remapping)  
 ✅ URL redirects
+
+**All operations are idempotent** - safe to re-run without creating duplicates.
 
 ## Output Files
 
@@ -285,16 +298,61 @@ npm run cli -- data:diff -i ./prod-dumps
 # - Click through menus
 ```
 
+### Clean and Rebuild (Development)
+
+```bash
+# Use case: Testing file upload or starting fresh
+
+# 1. Delete all files from destination
+npm run cli -- data:drop --files-only
+# Interactive confirmation required (type "delete")
+
+# 2. Re-upload files
+npm run cli -- data:apply -i ./dumps
+
+# Result: Fresh file upload with proper alt text and references
+```
+
 ### Update Existing Migration
 
 ```bash
-# Safe to re-run! Operations are idempotent
+# Safe to re-run! Operations are 100% idempotent
 npm run cli -- data:dump -o ./dumps
 npm run cli -- data:apply -i ./dumps
 
+# What happens on re-run:
+# - Files: Updated if alt text changed, skipped if unchanged (no duplicates)
+# - Metaobjects: Updated by type:handle, not duplicated
+# - Metafields: Updated by namespace:key, not duplicated
+# - Pages/Blogs/Articles: Updated by handle, not duplicated
 # Only new/changed items will be created/updated
-# Existing items remain unchanged
 ```
+
+### File Idempotency Details
+
+The file upload process is fully idempotent:
+
+```bash
+# First run - uploads all files
+npm run cli -- data:apply -i ./dumps
+# → Files: 50 uploaded, 0 updated, 0 skipped
+
+# Second run - skips unchanged files
+npm run cli -- data:apply -i ./dumps
+# → Files: 0 uploaded, 0 updated, 50 skipped
+
+# After changing alt text in source dump
+npm run cli -- data:apply -i ./dumps
+# → Files: 0 uploaded, 5 updated, 45 skipped
+```
+
+**How it works:**
+
+- Queries existing destination files (matched by filename)
+- Updates if alt text differs
+- Skips if file is already correct
+- Creates only if file doesn't exist
+- No duplicates, even on multiple runs
 
 ## Troubleshooting
 
@@ -322,6 +380,25 @@ Check `--verbose` logs for warnings. Ensure source resources exist with proper h
 npm run cli -- data:diff -i ./dumps --verbose
 # Review differences and re-apply if needed
 npm run cli -- data:apply -i ./dumps
+```
+
+### Duplicate files after migration
+
+If you accidentally created duplicate files:
+
+```bash
+# 1. Delete all files from destination
+npm run cli -- data:drop --files-only
+
+# 2. Re-run migration (files will be uploaded fresh)
+npm run cli -- data:apply -i ./dumps
+```
+
+### Testing file upload without full migration
+
+```bash
+# Upload only files (skip metaobjects, products, etc.)
+npm run cli -- files:apply -i ./dumps/files.jsonl
 ```
 
 ## Performance Expectations
@@ -399,8 +476,10 @@ read_online_store_pages, write_online_store_pages
 
 - **README.md** - Main guide with complete workflow
 - **SETUP.md** - Installation and configuration details
-- **QUICK_REFERENCE.md** - This cheat sheet
+- **QUICK_REFERENCE.md** - This cheat sheet (you are here)
 - **IMPLEMENTATION.md** - Technical implementation details
+- **docs/IDEMPOTENT_FILES.md** - File idempotency implementation guide
+- **docs/FILE_IDEMPOTENCY_IMPLEMENTATION.md** - Technical summary
 
 ---
 

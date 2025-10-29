@@ -54,6 +54,26 @@ npm run cli -- defs:diff -f source-defs.json          # Check schema
 npm run cli -- data:diff -i ./dumps                   # Check data
 ```
 
+## Theme Migration (Shopify CLI)
+
+**⚠️ Use Shopify CLI for themes - not this tool!**
+
+```bash
+# Install Shopify CLI
+npm install -g @shopify/cli @shopify/theme
+
+# Pull from source
+shopify theme pull --store=source-store.myshopify.com
+
+# Push to destination
+shopify theme push --store=destination-store.myshopify.com
+
+# Publish (after review)
+shopify theme publish <theme-id> --store=destination-store.myshopify.com
+```
+
+**Why?** Shopify CLI is purpose-built for themes with proper versioning, settings preservation, and asset optimization.
+
 ## Complete Migration Workflow
 
 ### Step 1: Export Definitions (Schema)

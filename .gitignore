@@ -36,6 +36,7 @@ dumps/
 *.jsonl
 defs.json
 data/
+theme/
 
 # Temporary files
 tmp/

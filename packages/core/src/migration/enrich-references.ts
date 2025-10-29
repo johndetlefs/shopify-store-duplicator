@@ -241,28 +241,29 @@ function enrichMetafield(
           case "Product":
             const productHandle = mappings.products.get(gid);
             if (productHandle) {
-              entry.product = { handle: productHandle };
+              entry.productHandle = productHandle;
             }
             break;
 
           case "Collection":
             const collectionHandle = mappings.collections.get(gid);
             if (collectionHandle) {
-              entry.collection = { handle: collectionHandle };
+              entry.collectionHandle = collectionHandle;
             }
             break;
 
           case "Page":
             const pageHandle = mappings.pages.get(gid);
             if (pageHandle) {
-              entry.page = { handle: pageHandle };
+              entry.pageHandle = pageHandle;
             }
             break;
 
           case "Metaobject":
             const moData = mappings.metaobjects.get(gid);
             if (moData) {
-              entry.metaobject = moData;
+              entry.metaobjectType = moData.type;
+              entry.metaobjectHandle = moData.handle;
             }
             break;
 
@@ -271,14 +272,16 @@ function enrichMetafield(
           case "Video":
             const fileUrl = mappings.files.get(gid);
             if (fileUrl) {
-              entry.file = { url: fileUrl };
+              entry.fileUrl = fileUrl;
             }
             break;
 
           case "ProductVariant":
             const variantData = mappings.variants.get(gid);
             if (variantData) {
-              entry.variant = variantData;
+              entry.variantProductHandle = variantData.productHandle;
+              entry.variantSku = variantData.sku;
+              entry.variantPosition = variantData.position;
             }
             break;
         }
@@ -413,26 +416,28 @@ function enrichObject(obj: any, mappings: GidMapping): any {
             switch (type) {
               case "Product":
                 const productHandle = mappings.products.get(gid);
-                if (productHandle) entry.product = { handle: productHandle };
+                if (productHandle) entry.productHandle = productHandle;
                 break;
               case "Collection":
                 const collectionHandle = mappings.collections.get(gid);
-                if (collectionHandle)
-                  entry.collection = { handle: collectionHandle };
+                if (collectionHandle) entry.collectionHandle = collectionHandle;
                 break;
               case "Page":
                 const pageHandle = mappings.pages.get(gid);
-                if (pageHandle) entry.page = { handle: pageHandle };
+                if (pageHandle) entry.pageHandle = pageHandle;
                 break;
               case "Metaobject":
                 const moData = mappings.metaobjects.get(gid);
-                if (moData) entry.metaobject = moData;
+                if (moData) {
+                  entry.metaobjectType = moData.type;
+                  entry.metaobjectHandle = moData.handle;
+                }
                 break;
               case "MediaImage":
               case "GenericFile":
               case "Video":
                 const fileUrl = mappings.files.get(gid);
-                if (fileUrl) entry.file = { url: fileUrl };
+                if (fileUrl) entry.fileUrl = fileUrl;
                 break;
             }
 

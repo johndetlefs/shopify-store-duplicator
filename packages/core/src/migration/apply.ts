@@ -31,6 +31,11 @@ import {
   BLOG_UPDATE,
   ARTICLE_CREATE,
   ARTICLE_UPDATE,
+  PRODUCT_CREATE,
+  PRODUCT_UPDATE,
+  PRODUCT_VARIANT_BULK_CREATE,
+  COLLECTION_CREATE,
+  COLLECTION_UPDATE,
 } from "../graphql/queries.js";
 import { applyFiles, type FileIndex } from "../files/apply.js";
 import { relinkMetaobjects } from "../files/relink.js";
@@ -111,6 +116,15 @@ interface DumpedProduct {
   title: string;
   descriptionHtml?: string;
   status: string;
+  vendor?: string;
+  productType?: string;
+  tags?: string[];
+  options?: Array<{
+    id: string;
+    name: string;
+    position: number;
+    values: string[];
+  }>;
   metafields: DumpedMetafield[];
   variants: DumpedVariant[];
 }
@@ -120,6 +134,26 @@ interface DumpedVariant {
   sku?: string;
   title: string;
   position: number;
+  price?: string;
+  compareAtPrice?: string;
+  barcode?: string;
+  inventoryQuantity?: number;
+  inventoryPolicy?: string;
+  taxable?: boolean;
+  selectedOptions?: Array<{
+    name: string;
+    value: string;
+  }>;
+  inventoryItem?: {
+    id: string;
+    tracked: boolean;
+    measurement?: {
+      weight?: {
+        value: number;
+        unit: string;
+      };
+    };
+  };
   metafields: DumpedMetafield[];
 }
 
@@ -1029,6 +1063,408 @@ export async function applyShopMetafields(
 }
 
 // ============================================================================
+// Apply Products
+// ============================================================================
+
+/**
+ * Apply products (create/update product data).
+ * This creates products that don't exist and updates basic fields for existing products.
+ * Note: This creates products with basic info only. Variants, pricing, inventory handled separately.
+ */
+export async function applyProducts(
+  client: GraphQLClient,
+  inputFile: string,
+  index: DestinationIndex
+): Promise<Result<ApplyStats, Error>> {
+  logger.info("=== Applying Products ===");
+
+  const stats: ApplyStats = {
+    total: 0,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+    errors: [],
+  };
+
+  if (!fs.existsSync(inputFile)) {
+    logger.warn(`Products dump not found: ${inputFile}`);
+    return ok(stats);
+  }
+
+  const content = fs.readFileSync(inputFile, "utf-8");
+  const lines = content.split("\n").filter((l) => l.trim());
+
+  for (const line of lines) {
+    stats.total++;
+
+    try {
+      const product = JSON.parse(line) as DumpedProduct;
+      const existingProductGid = gidForProductHandle(index, product.handle);
+
+      if (existingProductGid) {
+        // Product exists - update it
+        const result = await client.request({
+          query: PRODUCT_UPDATE,
+          variables: {
+            product: {
+              id: existingProductGid,
+              title: product.title,
+              descriptionHtml: product.descriptionHtml || "",
+              status: product.status || "ACTIVE",
+            },
+          },
+        });
+
+        if (!result.ok) {
+          stats.failed++;
+          stats.errors.push({
+            handle: product.handle,
+            error: result.error.message,
+          });
+          logger.warn(`Failed to update product ${product.handle}`, {
+            error: result.error.message,
+          });
+          continue;
+        }
+
+        const response = result.data.data?.productUpdate;
+        if (response?.userErrors && response.userErrors.length > 0) {
+          stats.failed++;
+          const errorMsg = response.userErrors
+            .map((e: any) => e.message)
+            .join(", ");
+          stats.errors.push({ handle: product.handle, error: errorMsg });
+          logger.warn(`Product update user errors for ${product.handle}`, {
+            errors: response.userErrors,
+          });
+          continue;
+        }
+
+        stats.updated++;
+        logger.debug(`✓ Updated product: ${product.handle}`);
+      } else {
+        // Product doesn't exist - create it with options
+        const productInput: any = {
+          title: product.title,
+          handle: product.handle,
+          descriptionHtml: product.descriptionHtml || "",
+          status: product.status || "ACTIVE",
+        };
+
+        // Add optional fields if present
+        if (product.vendor) productInput.vendor = product.vendor;
+        if (product.productType) productInput.productType = product.productType;
+        if (product.tags && product.tags.length > 0)
+          productInput.tags = product.tags;
+
+        // Add product options if present
+        if (product.options && product.options.length > 0) {
+          productInput.productOptions = product.options.map((opt) => ({
+            name: opt.name,
+            position: opt.position,
+            values: opt.values.map((v) => ({ name: v })),
+          }));
+        }
+
+        const result = await client.request({
+          query: PRODUCT_CREATE,
+          variables: {
+            product: productInput,
+          },
+        });
+
+        if (!result.ok) {
+          stats.failed++;
+          stats.errors.push({
+            handle: product.handle,
+            error: result.error.message,
+          });
+          logger.warn(`Failed to create product ${product.handle}`, {
+            error: result.error.message,
+          });
+          continue;
+        }
+
+        const response = result.data.data?.productCreate;
+        if (response?.userErrors && response.userErrors.length > 0) {
+          stats.failed++;
+          const errorMsg = response.userErrors
+            .map((e: any) => e.message)
+            .join(", ");
+          stats.errors.push({ handle: product.handle, error: errorMsg });
+          logger.warn(`Product create user errors for ${product.handle}`, {
+            errors: response.userErrors,
+          });
+          continue;
+        }
+
+        const createdProductId = response?.product?.id;
+        if (!createdProductId) {
+          stats.failed++;
+          stats.errors.push({
+            handle: product.handle,
+            error: "No product ID returned",
+          });
+          logger.warn(`No product ID returned for ${product.handle}`);
+          continue;
+        }
+
+        stats.created++;
+        logger.debug(`✓ Created product: ${product.handle}`);
+
+        // Create variants if there are any (skip if only default variant)
+        if (product.variants && product.variants.length > 0) {
+          // Check if this is just a default variant (no options)
+          const hasRealVariants =
+            product.variants.length > 1 ||
+            (product.variants[0] &&
+              product.variants[0].selectedOptions &&
+              product.variants[0].selectedOptions.length > 0);
+
+          if (hasRealVariants) {
+            const variantInputs = product.variants.map((v) => {
+              const variantInput: any = {
+                price: v.price || "0.00",
+              };
+
+              // Add optional fields at variant level
+              if (v.compareAtPrice)
+                variantInput.compareAtPrice = v.compareAtPrice;
+              if (v.barcode) variantInput.barcode = v.barcode;
+              if (v.taxable !== undefined) variantInput.taxable = v.taxable;
+              if (v.inventoryPolicy)
+                variantInput.inventoryPolicy = v.inventoryPolicy;
+
+              // Build inventoryItem object for SKU, tracking, and weight
+              const inventoryItem: any = {};
+              if (v.sku) inventoryItem.sku = v.sku;
+              if (v.inventoryItem?.tracked !== undefined) {
+                inventoryItem.tracked = v.inventoryItem.tracked;
+              }
+              if (v.inventoryItem?.measurement?.weight) {
+                inventoryItem.measurement = {
+                  weight: {
+                    value: v.inventoryItem.measurement.weight.value,
+                    unit: v.inventoryItem.measurement.weight.unit.toUpperCase(),
+                  },
+                };
+              }
+              if (Object.keys(inventoryItem).length > 0) {
+                variantInput.inventoryItem = inventoryItem;
+              }
+
+              if (v.selectedOptions && v.selectedOptions.length > 0) {
+                variantInput.optionValues = v.selectedOptions.map((opt) => ({
+                  optionName: opt.name,
+                  name: opt.value,
+                }));
+              }
+
+              return variantInput;
+            });
+
+            const variantResult = await client.request({
+              query: PRODUCT_VARIANT_BULK_CREATE,
+              variables: {
+                productId: createdProductId,
+                variants: variantInputs,
+              },
+            });
+
+            if (!variantResult.ok) {
+              logger.warn(
+                `Failed to create variants for product ${product.handle}`,
+                {
+                  error: variantResult.error.message,
+                }
+              );
+            } else {
+              const variantResponse =
+                variantResult.data.data?.productVariantsBulkCreate;
+              if (
+                variantResponse?.userErrors &&
+                variantResponse.userErrors.length > 0
+              ) {
+                logger.warn(
+                  `Variant creation user errors for ${product.handle}`,
+                  {
+                    errors: variantResponse.userErrors,
+                  }
+                );
+              } else {
+                logger.debug(
+                  `✓ Created ${product.variants.length} variants for ${product.handle}`
+                );
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      stats.failed++;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      stats.errors.push({ handle: "unknown", error: errorMsg });
+      logger.warn("Error applying product", { error: errorMsg });
+    }
+  }
+
+  logger.info(`✓ Applied ${stats.total} products`, {
+    created: stats.created,
+    updated: stats.updated,
+    failed: stats.failed,
+  });
+
+  return ok(stats);
+}
+
+// ============================================================================
+// Apply Collections
+// ============================================================================
+
+/**
+ * Apply collections (create/update collection data).
+ * This creates collections that don't exist and updates basic fields for existing collections.
+ */
+export async function applyCollections(
+  client: GraphQLClient,
+  inputFile: string,
+  index: DestinationIndex
+): Promise<Result<ApplyStats, Error>> {
+  logger.info("=== Applying Collections ===");
+
+  const stats: ApplyStats = {
+    total: 0,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+    errors: [],
+  };
+
+  if (!fs.existsSync(inputFile)) {
+    logger.warn(`Collections dump not found: ${inputFile}`);
+    return ok(stats);
+  }
+
+  const content = fs.readFileSync(inputFile, "utf-8");
+  const lines = content.split("\n").filter((l) => l.trim());
+
+  for (const line of lines) {
+    stats.total++;
+
+    try {
+      const collection = JSON.parse(line) as DumpedCollection;
+      const existingCollectionGid = gidForCollectionHandle(
+        index,
+        collection.handle
+      );
+
+      if (existingCollectionGid) {
+        // Collection exists - update it
+        const result = await client.request({
+          query: COLLECTION_UPDATE,
+          variables: {
+            id: existingCollectionGid,
+            input: {
+              title: collection.title,
+              descriptionHtml: collection.descriptionHtml || "",
+            },
+          },
+        });
+
+        if (!result.ok) {
+          stats.failed++;
+          stats.errors.push({
+            handle: collection.handle,
+            error: result.error.message,
+          });
+          logger.warn(`Failed to update collection ${collection.handle}`, {
+            error: result.error.message,
+          });
+          continue;
+        }
+
+        const response = result.data.data?.collectionUpdate;
+        if (response?.userErrors && response.userErrors.length > 0) {
+          stats.failed++;
+          const errorMsg = response.userErrors
+            .map((e: any) => e.message)
+            .join(", ");
+          stats.errors.push({ handle: collection.handle, error: errorMsg });
+          logger.warn(
+            `Collection update user errors for ${collection.handle}`,
+            {
+              errors: response.userErrors,
+            }
+          );
+          continue;
+        }
+
+        stats.updated++;
+        logger.debug(`✓ Updated collection: ${collection.handle}`);
+      } else {
+        // Collection doesn't exist - create it
+        const result = await client.request({
+          query: COLLECTION_CREATE,
+          variables: {
+            input: {
+              title: collection.title,
+              handle: collection.handle,
+              descriptionHtml: collection.descriptionHtml || "",
+            },
+          },
+        });
+
+        if (!result.ok) {
+          stats.failed++;
+          stats.errors.push({
+            handle: collection.handle,
+            error: result.error.message,
+          });
+          logger.warn(`Failed to create collection ${collection.handle}`, {
+            error: result.error.message,
+          });
+          continue;
+        }
+
+        const response = result.data.data?.collectionCreate;
+        if (response?.userErrors && response.userErrors.length > 0) {
+          stats.failed++;
+          const errorMsg = response.userErrors
+            .map((e: any) => e.message)
+            .join(", ");
+          stats.errors.push({ handle: collection.handle, error: errorMsg });
+          logger.warn(
+            `Collection create user errors for ${collection.handle}`,
+            {
+              errors: response.userErrors,
+            }
+          );
+          continue;
+        }
+
+        stats.created++;
+        logger.debug(`✓ Created collection: ${collection.handle}`);
+      }
+    } catch (err) {
+      stats.failed++;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      stats.errors.push({ handle: "unknown", error: errorMsg });
+      logger.warn("Error applying collection", { error: errorMsg });
+    }
+  }
+
+  logger.info(`✓ Applied ${stats.total} collections`, {
+    created: stats.created,
+    updated: stats.updated,
+    failed: stats.failed,
+  });
+
+  return ok(stats);
+}
+
+// ============================================================================
 // Apply Pages (Content)
 // ============================================================================
 
@@ -1521,9 +1957,19 @@ export async function applyArticles(
  * 5. Apply pages (create/update content)
  * 6. Apply metafields to products, collections, pages, blogs, articles, shop
  */
+export interface ApplyOptions {
+  productsOnly?: boolean;
+  collectionsOnly?: boolean;
+  metaobjectsOnly?: boolean;
+  pagesOnly?: boolean;
+  blogsOnly?: boolean;
+  articlesOnly?: boolean;
+}
+
 export async function applyAllData(
   client: GraphQLClient,
-  inputDir: string
+  inputDir: string,
+  options: ApplyOptions = {}
 ): Promise<
   Result<
     {
@@ -1533,88 +1979,178 @@ export async function applyAllData(
       pages: ApplyStats;
       metafields: ApplyStats;
       files: { uploaded: number; failed: number };
+      products?: ApplyStats;
+      collections?: ApplyStats;
     },
     Error
   >
 > {
   logger.info("=== Starting Data Apply ===");
 
+  // Determine what to apply
+  const applyAll =
+    !options.productsOnly &&
+    !options.collectionsOnly &&
+    !options.metaobjectsOnly &&
+    !options.pagesOnly &&
+    !options.blogsOnly &&
+    !options.articlesOnly;
+
   // Step 1: Build destination index
   logger.info("Step 1: Building destination index...");
   const index = await buildDestinationIndex(client);
 
   // Step 2: Apply files (BEFORE metaobjects so we can relink file references)
-  logger.info("Step 2: Applying files...");
-  const filesFile = path.join(inputDir, "files.jsonl");
-  const filesResult = await applyFiles(client, filesFile);
+  let fileIndex: FileIndex = { urlToGid: new Map(), gidToGid: new Map() };
+  if (applyAll || options.metaobjectsOnly) {
+    logger.info("Step 2: Applying files...");
+    const filesFile = path.join(inputDir, "files.jsonl");
+    const filesResult = await applyFiles(client, filesFile);
 
-  let fileIndex: FileIndex;
-  if (!filesResult.ok) {
-    logger.warn("Files apply failed, continuing without file relinking...");
-    fileIndex = { urlToGid: new Map(), gidToGid: new Map() };
-  } else {
-    fileIndex = filesResult.data;
+    if (!filesResult.ok) {
+      logger.warn("Files apply failed, continuing without file relinking...");
+    } else {
+      fileIndex = filesResult.data;
+    }
   }
 
   // Step 3: Apply metaobjects (with file relinking)
-  logger.info("Step 3: Applying metaobjects...");
-  const metaobjectsResult = await applyMetaobjects(
-    client,
-    inputDir,
-    index,
-    fileIndex
-  );
-  if (!metaobjectsResult.ok) {
-    return err(metaobjectsResult.error);
+  let metaobjectsResult: Result<ApplyStats, Error>;
+  if (applyAll || options.metaobjectsOnly) {
+    logger.info("Step 3: Applying metaobjects...");
+    metaobjectsResult = await applyMetaobjects(
+      client,
+      inputDir,
+      index,
+      fileIndex
+    );
+    if (!metaobjectsResult.ok) {
+      return err(metaobjectsResult.error);
+    }
+  } else {
+    metaobjectsResult = ok({
+      total: 0,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      errors: [],
+    });
   }
 
   // Rebuild index after creating metaobjects to ensure new ones are mapped
   logger.info("Rebuilding index after metaobject creation...");
   let updatedIndex = await buildDestinationIndex(client);
 
-  // Step 4: Apply blogs (before articles)
-  logger.info("Step 4: Applying blogs...");
-  const blogsFile = path.join(inputDir, "blogs.jsonl");
-  const blogsResult = await applyBlogs(client, blogsFile, updatedIndex);
-  if (!blogsResult.ok) {
-    logger.warn("Blogs apply failed, continuing...");
+  // Step 4: Apply products (before metafields)
+  let productsResult: Result<ApplyStats, Error> | undefined;
+  if (applyAll || options.productsOnly) {
+    logger.info("Step 4: Applying products...");
+    const productsFile = path.join(inputDir, "products.jsonl");
+    productsResult = await applyProducts(client, productsFile, updatedIndex);
+    if (!productsResult.ok) {
+      logger.warn("Products apply failed, continuing...");
+    }
+
+    // Rebuild index after creating products to ensure new products are mapped
+    logger.info("Rebuilding index after product creation...");
+    updatedIndex = await buildDestinationIndex(client);
   }
 
-  // Rebuild index after creating blogs to ensure new blogs are mapped
-  logger.info("Rebuilding index after blog creation...");
-  updatedIndex = await buildDestinationIndex(client);
+  // Step 5: Apply collections (before metafields)
+  let collectionsResult: Result<ApplyStats, Error> | undefined;
+  if (applyAll || options.collectionsOnly) {
+    logger.info("Step 5: Applying collections...");
+    const collectionsFile = path.join(inputDir, "collections.jsonl");
+    collectionsResult = await applyCollections(
+      client,
+      collectionsFile,
+      updatedIndex
+    );
+    if (!collectionsResult.ok) {
+      logger.warn("Collections apply failed, continuing...");
+    }
 
-  // Step 5: Apply articles (after blogs)
-  logger.info("Step 5: Applying articles...");
-  const articlesFile = path.join(inputDir, "articles.jsonl");
-  const articlesResult = await applyArticles(
-    client,
-    articlesFile,
-    updatedIndex
-  );
-  if (!articlesResult.ok) {
-    logger.warn("Articles apply failed, continuing...");
+    // Rebuild index after creating collections to ensure new collections are mapped
+    logger.info("Rebuilding index after collection creation...");
+    updatedIndex = await buildDestinationIndex(client);
   }
 
-  // Rebuild index after creating articles to ensure new articles are mapped
-  logger.info("Rebuilding index after article creation...");
-  updatedIndex = await buildDestinationIndex(client);
+  // Step 6: Apply blogs (before articles)
+  let blogsResult: Result<ApplyStats, Error>;
+  if (applyAll || options.blogsOnly) {
+    logger.info("Step 6: Applying blogs...");
+    const blogsFile = path.join(inputDir, "blogs.jsonl");
+    blogsResult = await applyBlogs(client, blogsFile, updatedIndex);
+    if (!blogsResult.ok) {
+      logger.warn("Blogs apply failed, continuing...");
+    }
 
-  // Step 6: Apply pages (create/update content before metafields)
-  logger.info("Step 6: Applying pages...");
-  const pagesFile = path.join(inputDir, "pages.jsonl");
-  const pagesResult = await applyPages(client, pagesFile, updatedIndex);
-  if (!pagesResult.ok) {
-    logger.warn("Pages apply failed, continuing...");
+    // Rebuild index after creating blogs to ensure new blogs are mapped
+    logger.info("Rebuilding index after blog creation...");
+    updatedIndex = await buildDestinationIndex(client);
+  } else {
+    blogsResult = ok({
+      total: 0,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      errors: [],
+    });
   }
 
-  // Rebuild index after creating pages to ensure new pages are mapped
-  logger.info("Rebuilding index after page creation...");
-  const finalIndex = await buildDestinationIndex(client);
+  // Step 7: Apply articles (after blogs)
+  let articlesResult: Result<ApplyStats, Error>;
+  if (applyAll || options.articlesOnly) {
+    logger.info("Step 7: Applying articles...");
+    const articlesFile = path.join(inputDir, "articles.jsonl");
+    articlesResult = await applyArticles(client, articlesFile, updatedIndex);
+    if (!articlesResult.ok) {
+      logger.warn("Articles apply failed, continuing...");
+    }
 
-  // Step 7: Apply metafields
-  logger.info("Step 7: Applying metafields...");
+    // Rebuild index after creating articles to ensure new articles are mapped
+    logger.info("Rebuilding index after article creation...");
+    updatedIndex = await buildDestinationIndex(client);
+  } else {
+    articlesResult = ok({
+      total: 0,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      errors: [],
+    });
+  }
 
+  // Step 8: Apply pages (create/update content before metafields)
+  let pagesResult: Result<ApplyStats, Error>;
+  if (applyAll || options.pagesOnly) {
+    logger.info("Step 8: Applying pages...");
+    const pagesFile = path.join(inputDir, "pages.jsonl");
+    pagesResult = await applyPages(client, pagesFile, updatedIndex);
+    if (!pagesResult.ok) {
+      logger.warn("Pages apply failed, continuing...");
+    }
+
+    // Rebuild index after creating pages to ensure new pages are mapped
+    logger.info("Rebuilding index after page creation...");
+    updatedIndex = await buildDestinationIndex(client);
+  } else {
+    pagesResult = ok({
+      total: 0,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      errors: [],
+    });
+  }
+
+  const finalIndex = updatedIndex;
+
+  // Step 9: Apply metafields (to all resources) - only if doing full apply
   const aggregateMetafields: ApplyStats = {
     total: 0,
     created: 0,
@@ -1624,87 +2160,126 @@ export async function applyAllData(
     errors: [],
   };
 
-  // Products
-  const productsFile = path.join(inputDir, "products.jsonl");
-  const productMfResult = await applyProductMetafields(
-    client,
-    productsFile,
-    finalIndex
-  );
-  if (productMfResult.ok) {
-    const stats = productMfResult.data;
-    aggregateMetafields.total += stats.total;
-    aggregateMetafields.created += stats.created;
-    aggregateMetafields.failed += stats.failed;
-    aggregateMetafields.errors.push(...stats.errors);
+  if (applyAll) {
+    logger.info("Step 9: Applying metafields...");
+
+    // Products metafields
+    const productsFile = path.join(inputDir, "products.jsonl");
+    const productMfResult = await applyProductMetafields(
+      client,
+      productsFile,
+      finalIndex
+    );
+    if (productMfResult.ok) {
+      const stats = productMfResult.data;
+      aggregateMetafields.total += stats.total;
+      aggregateMetafields.created += stats.created;
+      aggregateMetafields.failed += stats.failed;
+      aggregateMetafields.errors.push(...stats.errors);
+    }
+
+    // Collections metafields
+    const collectionsFile = path.join(inputDir, "collections.jsonl");
+    const collectionMfResult = await applyCollectionMetafields(
+      client,
+      collectionsFile,
+      finalIndex
+    );
+    if (collectionMfResult.ok) {
+      const stats = collectionMfResult.data;
+      aggregateMetafields.total += stats.total;
+      aggregateMetafields.created += stats.created;
+      aggregateMetafields.failed += stats.failed;
+      aggregateMetafields.errors.push(...stats.errors);
+    }
+
+    // Pages metafields
+    const pagesFile = path.join(inputDir, "pages.jsonl");
+    const pageMfResult = await applyPageMetafields(
+      client,
+      pagesFile,
+      finalIndex
+    );
+    if (pageMfResult.ok) {
+      const stats = pageMfResult.data;
+      aggregateMetafields.total += stats.total;
+      aggregateMetafields.created += stats.created;
+      aggregateMetafields.failed += stats.failed;
+      aggregateMetafields.errors.push(...stats.errors);
+    }
+
+    // Shop metafields
+    const shopMetafieldsFile = path.join(inputDir, "shop-metafields.jsonl");
+    const shopMfResult = await applyShopMetafields(
+      client,
+      shopMetafieldsFile,
+      finalIndex
+    );
+    if (shopMfResult.ok) {
+      const stats = shopMfResult.data;
+      aggregateMetafields.total += stats.total;
+      aggregateMetafields.created += stats.created;
+      aggregateMetafields.failed += stats.failed;
+      aggregateMetafields.errors.push(...stats.errors);
+    }
   }
 
-  // Collections
-  const collectionsFile = path.join(inputDir, "collections.jsonl");
-  const collectionMfResult = await applyCollectionMetafields(
-    client,
-    collectionsFile,
-    finalIndex
-  );
-  if (collectionMfResult.ok) {
-    const stats = collectionMfResult.data;
-    aggregateMetafields.total += stats.total;
-    aggregateMetafields.created += stats.created;
-    aggregateMetafields.failed += stats.failed;
-    aggregateMetafields.errors.push(...stats.errors);
-  }
+  const metaobjectsData = metaobjectsResult.ok
+    ? metaobjectsResult.data
+    : { total: 0, created: 0, updated: 0, skipped: 0, failed: 0, errors: [] };
 
-  // Pages metafields
-  const pageMfResult = await applyPageMetafields(client, pagesFile, finalIndex);
-  if (pageMfResult.ok) {
-    const stats = pageMfResult.data;
-    aggregateMetafields.total += stats.total;
-    aggregateMetafields.created += stats.created;
-    aggregateMetafields.failed += stats.failed;
-    aggregateMetafields.errors.push(...stats.errors);
-  }
+  const blogsData = blogsResult.ok
+    ? blogsResult.data
+    : { total: 0, created: 0, updated: 0, skipped: 0, failed: 0, errors: [] };
 
-  // Shop metafields
-  const shopMetafieldsFile = path.join(inputDir, "shop-metafields.jsonl");
-  const shopMfResult = await applyShopMetafields(
-    client,
-    shopMetafieldsFile,
-    finalIndex
-  );
-  if (shopMfResult.ok) {
-    const stats = shopMfResult.data;
-    aggregateMetafields.total += stats.total;
-    aggregateMetafields.created += stats.created;
-    aggregateMetafields.failed += stats.failed;
-    aggregateMetafields.errors.push(...stats.errors);
-  }
+  const articlesData = articlesResult.ok
+    ? articlesResult.data
+    : { total: 0, created: 0, updated: 0, skipped: 0, failed: 0, errors: [] };
+
+  const pagesData = pagesResult.ok
+    ? pagesResult.data
+    : { total: 0, created: 0, updated: 0, skipped: 0, failed: 0, errors: [] };
 
   logger.info("=== Data Apply Complete ===", {
     files: {
       uploaded: fileIndex.urlToGid.size,
     },
     metaobjects: {
-      total: metaobjectsResult.data.total,
-      created: metaobjectsResult.data.created,
-      failed: metaobjectsResult.data.failed,
+      total: metaobjectsData.total,
+      created: metaobjectsData.created,
+      failed: metaobjectsData.failed,
     },
+    products: productsResult?.ok
+      ? {
+          total: productsResult.data.total,
+          created: productsResult.data.created,
+          failed: productsResult.data.failed,
+        }
+      : undefined,
+    collections: collectionsResult?.ok
+      ? {
+          total: collectionsResult.data.total,
+          created: collectionsResult.data.created,
+          failed: collectionsResult.data.failed,
+        }
+      : undefined,
     blogs: {
-      total: blogsResult.ok ? blogsResult.data.total : 0,
-      created: blogsResult.ok ? blogsResult.data.created : 0,
-      updated: blogsResult.ok ? blogsResult.data.updated : 0,
-      failed: blogsResult.ok ? blogsResult.data.failed : 0,
+      total: blogsData.total,
+      created: blogsData.created,
+      updated: blogsData.updated,
+      failed: blogsData.failed,
     },
     articles: {
-      total: articlesResult.ok ? articlesResult.data.total : 0,
-      created: articlesResult.ok ? articlesResult.data.created : 0,
-      updated: articlesResult.ok ? articlesResult.data.updated : 0,
-      failed: articlesResult.ok ? articlesResult.data.failed : 0,
+      total: articlesData.total,
+      created: articlesData.created,
+      updated: articlesData.updated,
+      failed: articlesData.failed,
     },
     pages: {
-      total: pagesResult.ok ? pagesResult.data.total : 0,
-      created: pagesResult.ok ? pagesResult.data.created : 0,
-      updated: pagesResult.ok ? pagesResult.data.updated : 0,
-      failed: pagesResult.ok ? pagesResult.data.failed : 0,
+      total: pagesData.total,
+      created: pagesData.created,
+      updated: pagesData.updated,
+      failed: pagesData.failed,
     },
     metafields: {
       total: aggregateMetafields.total,
@@ -1718,37 +2293,12 @@ export async function applyAllData(
       uploaded: fileIndex.urlToGid.size,
       failed: 0, // TODO: track failed uploads
     },
-    metaobjects: metaobjectsResult.data,
-    blogs: blogsResult.ok
-      ? blogsResult.data
-      : {
-          total: 0,
-          created: 0,
-          updated: 0,
-          skipped: 0,
-          failed: 0,
-          errors: [],
-        },
-    articles: articlesResult.ok
-      ? articlesResult.data
-      : {
-          total: 0,
-          created: 0,
-          updated: 0,
-          skipped: 0,
-          failed: 0,
-          errors: [],
-        },
-    pages: pagesResult.ok
-      ? pagesResult.data
-      : {
-          total: 0,
-          created: 0,
-          updated: 0,
-          skipped: 0,
-          failed: 0,
-          errors: [],
-        },
+    metaobjects: metaobjectsData,
+    products: productsResult?.ok ? productsResult.data : undefined,
+    collections: collectionsResult?.ok ? collectionsResult.data : undefined,
+    blogs: blogsData,
+    articles: articlesData,
+    pages: pagesData,
     metafields: aggregateMetafields,
   });
 }

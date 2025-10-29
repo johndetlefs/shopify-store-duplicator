@@ -298,6 +298,15 @@ export const PRODUCTS_BULK = `
           title
           descriptionHtml
           status
+          vendor
+          productType
+          tags
+          options {
+            id
+            name
+            position
+            values
+          }
           metafields(first: 250) {
             edges {
               node {
@@ -348,6 +357,26 @@ export const PRODUCTS_BULK = `
                 sku
                 title
                 position
+                price
+                compareAtPrice
+                barcode
+                inventoryQuantity
+                inventoryPolicy
+                taxable
+                selectedOptions {
+                  name
+                  value
+                }
+                inventoryItem {
+                  id
+                  tracked
+                  measurement {
+                    weight {
+                      value
+                      unit
+                    }
+                  }
+                }
                 metafields(first: 250) {
                   edges {
                     node {
@@ -1077,6 +1106,86 @@ export const METAOBJECTS_HANDLES_QUERY = `
       pageInfo {
         hasNextPage
         endCursor
+      }
+    }
+  }
+`;
+
+export const PRODUCT_CREATE = `
+  mutation productCreate($product: ProductCreateInput!) {
+    productCreate(product: $product) {
+      product {
+        id
+        handle
+        title
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+export const PRODUCT_UPDATE = `
+  mutation productUpdate($product: ProductUpdateInput!) {
+    productUpdate(product: $product) {
+      product {
+        id
+        handle
+        title
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+export const PRODUCT_VARIANT_BULK_CREATE = `
+  mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+    productVariantsBulkCreate(productId: $productId, variants: $variants) {
+      productVariants {
+        id
+        sku
+        price
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+export const COLLECTION_CREATE = `
+  mutation collectionCreate($input: CollectionInput!) {
+    collectionCreate(input: $input) {
+      collection {
+        id
+        handle
+        title
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+export const COLLECTION_UPDATE = `
+  mutation collectionUpdate($id: ID!, $input: CollectionInput!) {
+    collectionUpdate(id: $id, input: $input) {
+      collection {
+        id
+        handle
+        title
+      }
+      userErrors {
+        field
+        message
       }
     }
   }

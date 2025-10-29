@@ -306,6 +306,12 @@ program
   .command("data:apply")
   .description("Apply data to destination store")
   .option("-i, --input <dir>", "Input directory", "data/dumps")
+  .option("--products-only", "Apply products only")
+  .option("--collections-only", "Apply collections only")
+  .option("--metaobjects-only", "Apply metaobjects only")
+  .option("--pages-only", "Apply pages only")
+  .option("--blogs-only", "Apply blogs only")
+  .option("--articles-only", "Apply articles only")
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -335,14 +341,21 @@ program
 
     logger.info(`Applying data from ${inputDir} to destination store`);
 
-    const result = await applyAllData(client, inputDir);
+    const result = await applyAllData(client, inputDir, {
+      productsOnly: options.productsOnly,
+      collectionsOnly: options.collectionsOnly,
+      metaobjectsOnly: options.metaobjectsOnly,
+      pagesOnly: options.pagesOnly,
+      blogsOnly: options.blogsOnly,
+      articlesOnly: options.articlesOnly,
+    });
 
     if (!result.ok) {
       logger.error("Data apply failed", { error: result.error.message });
       process.exit(1);
     }
 
-    logger.info("✓ Data apply complete", {
+    const logData: any = {
       files: {
         uploaded: result.data.files.uploaded,
         failed: result.data.files.failed,
@@ -352,36 +365,73 @@ program
         created: result.data.metaobjects.created,
         failed: result.data.metaobjects.failed,
       },
-      blogs: {
-        total: result.data.blogs.total,
-        created: result.data.blogs.created,
-        updated: result.data.blogs.updated,
-        failed: result.data.blogs.failed,
-      },
-      articles: {
-        total: result.data.articles.total,
-        created: result.data.articles.created,
-        updated: result.data.articles.updated,
-        failed: result.data.articles.failed,
-      },
-      pages: {
-        total: result.data.pages.total,
-        created: result.data.pages.created,
-        updated: result.data.pages.updated,
-        failed: result.data.pages.failed,
-      },
-      metafields: {
-        total: result.data.metafields.total,
-        created: result.data.metafields.created,
-        failed: result.data.metafields.failed,
-      },
-    });
+    };
+
+    if (result.data.products) {
+      logData.products = {
+        total: result.data.products.total,
+        created: result.data.products.created,
+        failed: result.data.products.failed,
+      };
+    }
+
+    if (result.data.collections) {
+      logData.collections = {
+        total: result.data.collections.total,
+        created: result.data.collections.created,
+        failed: result.data.collections.failed,
+      };
+    }
+
+    logData.blogs = {
+      total: result.data.blogs.total,
+      created: result.data.blogs.created,
+      updated: result.data.blogs.updated,
+      failed: result.data.blogs.failed,
+    };
+
+    logData.articles = {
+      total: result.data.articles.total,
+      created: result.data.articles.created,
+      updated: result.data.articles.updated,
+      failed: result.data.articles.failed,
+    };
+
+    logData.pages = {
+      total: result.data.pages.total,
+      created: result.data.pages.created,
+      updated: result.data.pages.updated,
+      failed: result.data.pages.failed,
+    };
+
+    logData.metafields = {
+      total: result.data.metafields.total,
+      created: result.data.metafields.created,
+      failed: result.data.metafields.failed,
+    };
+
+    logger.info("✓ Data apply complete", logData);
 
     // Report errors
     if (result.data.metaobjects.errors.length > 0) {
       logger.warn(
         "Metaobject errors:",
         result.data.metaobjects.errors.slice(0, 10)
+      );
+    }
+    if (
+      result.data.products?.errors &&
+      result.data.products.errors.length > 0
+    ) {
+      logger.warn("Product errors:", result.data.products.errors.slice(0, 10));
+    }
+    if (
+      result.data.collections?.errors &&
+      result.data.collections.errors.length > 0
+    ) {
+      logger.warn(
+        "Collection errors:",
+        result.data.collections.errors.slice(0, 10)
       );
     }
     if (result.data.blogs.errors.length > 0) {
@@ -402,6 +452,8 @@ program
 
     const totalFailed =
       result.data.metaobjects.failed +
+      (result.data.products?.failed || 0) +
+      (result.data.collections?.failed || 0) +
       result.data.blogs.failed +
       result.data.articles.failed +
       result.data.pages.failed +

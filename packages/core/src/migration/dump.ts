@@ -177,6 +177,15 @@ interface DumpedProduct {
   title: string;
   descriptionHtml?: string;
   status: string;
+  vendor?: string;
+  productType?: string;
+  tags?: string[];
+  options?: Array<{
+    id: string;
+    name: string;
+    position: number;
+    values: string[];
+  }>;
   metafields: DumpedMetafield[];
   variants: DumpedVariant[];
 }
@@ -186,6 +195,26 @@ interface DumpedVariant {
   sku?: string;
   title: string;
   position: number;
+  price?: string;
+  compareAtPrice?: string;
+  barcode?: string;
+  inventoryQuantity?: number;
+  inventoryPolicy?: string;
+  taxable?: boolean;
+  selectedOptions?: Array<{
+    name: string;
+    value: string;
+  }>;
+  inventoryItem?: {
+    id: string;
+    tracked: boolean;
+    measurement?: {
+      weight?: {
+        value: number;
+        unit: string;
+      };
+    };
+  };
   metafields: DumpedMetafield[];
 }
 
@@ -604,6 +633,15 @@ export async function dumpProducts(
           title: obj.title,
           descriptionHtml: obj.descriptionHtml,
           status: obj.status,
+          vendor: obj.vendor,
+          productType: obj.productType,
+          tags: obj.tags,
+          options: obj.options?.map((opt: any) => ({
+            id: opt.id,
+            name: opt.name,
+            position: opt.position,
+            values: opt.values,
+          })),
           metafields: [],
           variants: [],
         };
@@ -615,6 +653,20 @@ export async function dumpProducts(
           sku: obj.sku,
           title: obj.title,
           position: obj.position,
+          price: obj.price,
+          compareAtPrice: obj.compareAtPrice,
+          barcode: obj.barcode,
+          inventoryQuantity: obj.inventoryQuantity,
+          inventoryPolicy: obj.inventoryPolicy,
+          taxable: obj.taxable,
+          selectedOptions: obj.selectedOptions,
+          inventoryItem: obj.inventoryItem
+            ? {
+                id: obj.inventoryItem.id,
+                tracked: obj.inventoryItem.tracked,
+                measurement: obj.inventoryItem.measurement,
+              }
+            : undefined,
           metafields: [],
         };
         variantsMap.set(obj.id, variant);

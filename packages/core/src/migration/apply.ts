@@ -163,6 +163,7 @@ interface DumpedCollection {
   handle: string;
   title: string;
   descriptionHtml?: string;
+  ruleSet?: any; // Collection rules for automated collections
   metafields: DumpedMetafield[];
 }
 
@@ -1530,14 +1531,21 @@ export async function applyCollections(
 
       if (existingCollectionGid) {
         // Collection exists - update it
+        const updateInput: any = {
+          id: existingCollectionGid,
+          title: collectionTitle,
+          descriptionHtml: collection.descriptionHtml || "",
+        };
+
+        // Include ruleSet if present (for automated collections)
+        if (collection.ruleSet) {
+          updateInput.ruleSet = collection.ruleSet;
+        }
+
         const result = await client.request({
           query: COLLECTION_UPDATE,
           variables: {
-            input: {
-              id: existingCollectionGid,
-              title: collectionTitle,
-              descriptionHtml: collection.descriptionHtml || "",
-            },
+            input: updateInput,
           },
         });
 
@@ -1573,14 +1581,21 @@ export async function applyCollections(
         logger.debug(`✓ Updated collection: ${collection.handle}`);
       } else {
         // Collection doesn't exist - create it
+        const createInput: any = {
+          title: collectionTitle,
+          handle: collection.handle,
+          descriptionHtml: collection.descriptionHtml || "",
+        };
+
+        // Include ruleSet if present (for automated collections)
+        if (collection.ruleSet) {
+          createInput.ruleSet = collection.ruleSet;
+        }
+
         const result = await client.request({
           query: COLLECTION_CREATE,
           variables: {
-            input: {
-              title: collectionTitle,
-              handle: collection.handle,
-              descriptionHtml: collection.descriptionHtml || "",
-            },
+            input: createInput,
           },
         });
 

@@ -240,6 +240,7 @@ interface DumpedCollection {
   handle: string;
   title: string;
   descriptionHtml?: string;
+  ruleSet?: any; // Collection rules for automated collections
   metafields: DumpedMetafield[];
 }
 
@@ -777,6 +778,10 @@ export async function dumpCollections(
           descriptionHtml: obj.descriptionHtml,
           metafields: [],
         };
+        // Include ruleSet if present (for automated collections)
+        if (obj.ruleSet) {
+          collection.ruleSet = obj.ruleSet;
+        }
         collectionsMap.set(obj.id, collection);
       } else if (typename === "Metafield") {
         // Metafield (child of collection)

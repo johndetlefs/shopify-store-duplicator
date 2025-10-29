@@ -409,6 +409,14 @@ export const COLLECTIONS_BULK = `
           handle
           title
           descriptionHtml
+          ruleSet {
+            appliedDisjunctively
+            rules {
+              column
+              relation
+              condition
+            }
+          }
           metafields(first: 250) {
             edges {
               node {

@@ -1397,3 +1397,107 @@ export const SHOP_POLICY_UPDATE = `
     }
   }
 `;
+
+/**
+ * Publications (Sales Channels)
+ */
+export const PUBLICATIONS_QUERY = `
+  query publications($first: Int!, $after: String) {
+    publications(first: $first, after: $after) {
+      edges {
+        node {
+          id
+          name
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`;
+
+/**
+ * Query to fetch publications for a specific product
+ */
+export const PRODUCT_PUBLICATIONS_QUERY = `
+  query productPublications($id: ID!) {
+    product(id: $id) {
+      id
+      resourcePublications(first: 25) {
+        edges {
+          node {
+            publication {
+              id
+              name
+            }
+            publishDate
+            isPublished
+          }
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * Query to fetch publications for a specific collection
+ */
+export const COLLECTION_PUBLICATIONS_QUERY = `
+  query collectionPublications($id: ID!) {
+    collection(id: $id) {
+      id
+      resourcePublications(first: 25) {
+        edges {
+          node {
+            publication {
+              id
+              name
+            }
+            publishDate
+            isPublished
+          }
+        }
+      }
+    }
+  }
+`;
+
+export const PUBLISHABLE_PUBLISH = `
+  mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
+    publishablePublish(id: $id, input: $input) {
+      publishable {
+        ... on Product {
+          id
+        }
+        ... on Collection {
+          id
+        }
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+export const PUBLISHABLE_UNPUBLISH = `
+  mutation publishableUnpublish($id: ID!, $input: [PublicationInput!]!) {
+    publishableUnpublish(id: $id, input: $input) {
+      publishable {
+        ... on Product {
+          id
+        }
+        ... on Collection {
+          id
+        }
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;

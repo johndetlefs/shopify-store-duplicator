@@ -28,6 +28,7 @@
 - ✅ **Data (content):** metaobject _entries_, metafields on core resources (products, variants, collections, pages, articles, blogs, shop), menus, redirects, policies.
 - ✅ **CMS content:** Pages, blogs, articles with full HTML content and metafields.
 - ✅ **Files:** Upload files to destination, build file index, automatically relink file references in metaobjects/metafields. **100% idempotent** - matches by filename, updates alt text if changed, skips unchanged files.
+- ✅ **Publications (Sales Channels):** Product and collection channel visibility (Online Store, Shop, POS, Inbox, custom channels). **100% idempotent** - unpublishes from all channels, then publishes only to matching source channels.
 - ✅ **Shop policies:** Refund, privacy, terms of service, shipping, contact information.
 - ✅ **Validation:** Diff commands for definitions and data to verify completeness.
 - **Non-goals:** orders, discounts, gift cards, analytics, customer data, theme code.
@@ -84,8 +85,8 @@ Use **Shopify Admin GraphQL** with **Bulk Operations** for large reads/writes wh
 
 ### Data
 
-- `data:dump` → Bulk export all data (metaobjects, products, collections, pages, blogs, articles, shop metafields, files)
-- `data:apply` → Import all data with automatic reference remapping and file relinking (7-phase workflow)
+- `data:dump` → Bulk export all data (metaobjects, products, collections, pages, blogs, articles, shop metafields, files, publications)
+- `data:apply` → Import all data with automatic reference remapping, file relinking, and publication syncing (7-phase workflow)
 - `data:diff` → Compare source dump vs destination, report missing resources
 
 ### Menus, Redirects & Policies
@@ -97,10 +98,10 @@ Use **Shopify Admin GraphQL** with **Bulk Operations** for large reads/writes wh
 - `policies:dump` → Export shop policies (refund, privacy, terms, shipping, contact)
 - `policies:apply` → Import shop policies (idempotent)
 
-### Files (Integrated into data:apply)
+### Files & Publications (Integrated into data:apply)
 
-- Files are automatically uploaded and relinked during `data:apply`
-- File references in metaobjects/metafields are automatically updated to destination GIDs
+- **Files:** Automatically uploaded and relinked during `data:apply`. File references in metaobjects/metafields are updated to destination GIDs.
+- **Publications (Sales Channels):** Product/collection channel visibility automatically synced during `data:apply`. Unpublishes from all channels, then publishes only to matching source channels (idempotent).
 
 ## Coding standards
 
@@ -120,6 +121,7 @@ Use **Shopify Admin GraphQL** with **Bulk Operations** for large reads/writes wh
   - `metafieldDefinitionCreate` / `metafieldDefinitionUpdate`
 - ✅ **Bulk Operations** for large reads/writes; poll status; upon `COMPLETED` download JSONL from `url`
 - ✅ **Files:** `stagedUploadsCreate` → upload → `fileCreate` with `originalSource` (plus direct URL where allowed)
+- ✅ **Publications:** `publishablePublish` / `publishableUnpublish` for sales channel visibility (Online Store, Shop, POS, Inbox, custom channels)
 - ✅ **Metaobject/metafield type parity** preserved (e.g., `list.single_line_text_field`)
 - ✅ **Blogs/Articles:** Handle hierarchical relationship; blogs created before articles
 - ✅ **Pages:** Full HTML content migration with `PAGE_CREATE` / `PAGE_UPDATE`

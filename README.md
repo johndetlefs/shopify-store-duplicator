@@ -10,6 +10,7 @@ Migrate **all custom data** from a source Shopify store to a destination store:
 - ✅ Pages, blogs, articles (content + metafields)
 - ✅ Shop-level metafields
 - ✅ Files (media library with automatic relinking)
+- ✅ Sales channel publications (Online Store, Shop, POS, Inbox, custom channels)
 - ✅ Navigation menus (with URL remapping)
 - ✅ URL redirects (SEO preservation)
 - ✅ Shop policies (refund, privacy, terms, shipping, contact)
@@ -130,6 +131,7 @@ npm run cli -- data:apply -i ./dumps
 5. Creates articles (linked to blogs)
 6. Creates pages with full HTML content
 7. Applies metafields to all resources (products, variants, collections, pages, blogs, articles, shop)
+8. **Syncs sales channel publications** (idempotent - unpublishes from all, then publishes to matching source channels)
 
 Result: Complete data migration with all references pointing to correct destination resources. **100% idempotent** - safe to re-run without creating duplicates.
 

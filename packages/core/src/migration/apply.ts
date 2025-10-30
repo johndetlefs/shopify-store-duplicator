@@ -132,6 +132,16 @@ interface DumpedProduct {
     alt?: string;
     mediaType: string;
   }>;
+  publications?: Array<{
+    node: {
+      publication: {
+        id: string;
+        name: string;
+      };
+      publishDate?: string;
+      isPublished: boolean;
+    };
+  }>;
   metafields: DumpedMetafield[];
   variants: DumpedVariant[];
 }
@@ -170,6 +180,16 @@ interface DumpedCollection {
   title: string;
   descriptionHtml?: string;
   ruleSet?: any; // Collection rules for automated collections
+  publications?: Array<{
+    node: {
+      publication: {
+        id: string;
+        name: string;
+      };
+      publishDate?: string;
+      isPublished: boolean;
+    };
+  }>;
   metafields: DumpedMetafield[];
 }
 
@@ -214,6 +234,8 @@ interface ApplyStats {
   updated: number;
   skipped: number;
   failed: number;
+  publicationsSynced?: number; // Number of resources that had publications synced
+  publicationErrors?: number; // Number of resources that failed publication sync
   errors: Array<{ handle?: string; error: string }>;
 }
 
@@ -547,6 +569,169 @@ async function applyMetaobjectsForType(
     `✓ Applied ${stats.created} metaobjects of type ${type} (${stats.failed} failed)`
   );
   return stats;
+}
+
+// ============================================================================
+// Publications (Sales Channels) Sync
+// ============================================================================
+
+/**
+ * Sync publications for a resource (product or collection).
+ *
+ * IDEMPOTENT STRATEGY:
+ * 1. Get source publications from dump (which channels it was published to)
+ * 2. Map source publication names to destination publication IDs
+ * 3. Unpublish from ALL destination publications first
+ * 4. Publish ONLY to channels that match source
+ *
+ * This ensures the destination exactly matches the source state, regardless of current state.
+ * Safe to re-run - will always converge to source state.
+ *
+ * @param client GraphQL client for destination store
+ * @param resourceId The GID of the product or collection in destination
+ * @param sourcePublications Array of publications from source dump
+ * @param index Destination index with publication name → GID mapping
+ * @param resourceHandle Handle of the resource (for logging)
+ */
+async function syncPublications(
+  client: GraphQLClient,
+  resourceId: string,
+  sourcePublications:
+    | Array<{
+        node: {
+          publication: { id: string; name: string };
+          publishDate?: string;
+          isPublished: boolean;
+        };
+      }>
+    | undefined,
+  index: DestinationIndex,
+  resourceHandle: string
+): Promise<{ synced: number; errors: string[] }> {
+  const errors: string[] = [];
+
+  // If no publications in source, nothing to sync
+  if (!sourcePublications || sourcePublications.length === 0) {
+    logger.debug(`No publications to sync for ${resourceHandle}`);
+    return { synced: 0, errors };
+  }
+
+  // Get list of publications to publish to (only ones that exist in destination)
+  const publicationsToPublish: string[] = [];
+  for (const pub of sourcePublications) {
+    if (!pub.node.isPublished) continue; // Skip unpublished
+
+    const pubName = pub.node.publication.name;
+    const destPubId = index.publications.get(pubName);
+
+    if (!destPubId) {
+      logger.debug(
+        `Publication "${pubName}" not found in destination, skipping for ${resourceHandle}`
+      );
+      continue;
+    }
+
+    publicationsToPublish.push(destPubId);
+  }
+
+  if (publicationsToPublish.length === 0) {
+    logger.debug(`No matching publications for ${resourceHandle}`);
+    return { synced: 0, errors };
+  }
+
+  // Unpublish from ALL publications first (to ensure clean state)
+  // We'll query all destination publications and unpublish from each
+  const allPublicationIds = Array.from(index.publications.values());
+
+  if (allPublicationIds.length > 0) {
+    try {
+      const unpublishInput = allPublicationIds.map((pubId) => ({
+        publicationId: pubId,
+      }));
+
+      const unpublishResult = await client.request({
+        query: `
+          mutation publishableUnpublish($id: ID!, $input: [PublicationInput!]!) {
+            publishableUnpublish(id: $id, input: $input) {
+              userErrors {
+                field
+                message
+              }
+            }
+          }
+        `,
+        variables: { id: resourceId, input: unpublishInput },
+      });
+
+      if (!unpublishResult.ok) {
+        logger.debug(
+          `Error unpublishing ${resourceHandle}: ${unpublishResult.error.message}`
+        );
+        // Continue anyway
+      } else if (
+        unpublishResult.data.data.publishableUnpublish?.userErrors?.length > 0
+      ) {
+        const errorMsg =
+          unpublishResult.data.data.publishableUnpublish.userErrors
+            .map((e: any) => e.message)
+            .join(", ");
+        logger.debug(`Unpublish warnings for ${resourceHandle}: ${errorMsg}`);
+      }
+    } catch (error) {
+      logger.debug(`Error unpublishing ${resourceHandle}: ${error}`);
+      // Continue anyway - we'll try to publish
+    }
+  }
+
+  // Now publish to target channels
+  try {
+    const publishInput = publicationsToPublish.map((pubId) => ({
+      publicationId: pubId,
+    }));
+
+    const publishResult = await client.request({
+      query: `
+        mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
+          publishablePublish(id: $id, input: $input) {
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `,
+      variables: { id: resourceId, input: publishInput },
+    });
+
+    if (!publishResult.ok) {
+      errors.push(publishResult.error.message);
+      logger.warn(
+        `Publish errors for ${resourceHandle}: ${publishResult.error.message}`
+      );
+      return { synced: 0, errors };
+    }
+
+    if (publishResult.data.data.publishablePublish?.userErrors?.length > 0) {
+      const errorMsg = publishResult.data.data.publishablePublish.userErrors
+        .map((e: any) => e.message)
+        .join(", ");
+      errors.push(errorMsg);
+      logger.warn(`Publish errors for ${resourceHandle}: ${errorMsg}`);
+      return { synced: 0, errors };
+    }
+
+    logger.debug(
+      `✓ Synced publications for ${resourceHandle} (published to ${publicationsToPublish.length} channels)`
+    );
+    return { synced: publicationsToPublish.length, errors };
+  } catch (error) {
+    const errorMsg = String(error);
+    errors.push(errorMsg);
+    logger.warn(
+      `Failed to sync publications for ${resourceHandle}: ${errorMsg}`
+    );
+    return { synced: 0, errors };
+  }
 }
 
 /**
@@ -1270,6 +1455,23 @@ export async function applyProducts(
         stats.updated++;
         logger.debug(`✓ Updated product: ${product.handle}`);
 
+        // Sync publications for updated product
+        if (product.publications) {
+          const pubResult = await syncPublications(
+            client,
+            existingProductGid,
+            product.publications,
+            index,
+            product.handle
+          );
+          if (pubResult.synced > 0) {
+            stats.publicationsSynced = (stats.publicationsSynced || 0) + 1;
+          }
+          if (pubResult.errors.length > 0) {
+            stats.publicationErrors = (stats.publicationErrors || 0) + 1;
+          }
+        }
+
         // Queue variants for later processing (after index rebuild)
         if (product.variants && product.variants.length > 0) {
           const hasRealVariants =
@@ -1378,6 +1580,23 @@ export async function applyProducts(
         stats.created++;
         logger.debug(`✓ Created product: ${product.handle}`);
 
+        // Sync publications for newly created product
+        if (product.publications) {
+          const pubResult = await syncPublications(
+            client,
+            createdProductId,
+            product.publications,
+            index,
+            product.handle
+          );
+          if (pubResult.synced > 0) {
+            stats.publicationsSynced = (stats.publicationsSynced || 0) + 1;
+          }
+          if (pubResult.errors.length > 0) {
+            stats.publicationErrors = (stats.publicationErrors || 0) + 1;
+          }
+        }
+
         // Queue variants for later processing (after index rebuild)
         if (product.variants && product.variants.length > 0) {
           const hasRealVariants =
@@ -1405,6 +1624,13 @@ export async function applyProducts(
   logger.info(
     `✓ Applied ${stats.total} products: ${stats.created} created, ${stats.updated} updated, ${stats.failed} failed`
   );
+  if (stats.publicationsSynced) {
+    logger.info(
+      `  Publications synced: ${stats.publicationsSynced} products${
+        stats.publicationErrors ? ` (${stats.publicationErrors} errors)` : ""
+      }`
+    );
+  }
 
   // Phase 2: Rebuild index once and process all variants
   if (productsNeedingVariants.length > 0) {
@@ -1671,6 +1897,23 @@ export async function applyCollections(
 
         stats.updated++;
         logger.debug(`✓ Updated collection: ${collection.handle}`);
+
+        // Sync publications for updated collection
+        if (collection.publications) {
+          const pubResult = await syncPublications(
+            client,
+            existingCollectionGid,
+            collection.publications,
+            index,
+            collection.handle
+          );
+          if (pubResult.synced > 0) {
+            stats.publicationsSynced = (stats.publicationsSynced || 0) + 1;
+          }
+          if (pubResult.errors.length > 0) {
+            stats.publicationErrors = (stats.publicationErrors || 0) + 1;
+          }
+        }
       } else {
         // Collection doesn't exist - create it
         const createInput: any = {
@@ -1721,6 +1964,25 @@ export async function applyCollections(
 
         stats.created++;
         logger.debug(`✓ Created collection: ${collection.handle}`);
+
+        const createdCollectionId = response?.collection?.id;
+
+        // Sync publications for newly created collection
+        if (createdCollectionId && collection.publications) {
+          const pubResult = await syncPublications(
+            client,
+            createdCollectionId,
+            collection.publications,
+            index,
+            collection.handle
+          );
+          if (pubResult.synced > 0) {
+            stats.publicationsSynced = (stats.publicationsSynced || 0) + 1;
+          }
+          if (pubResult.errors.length > 0) {
+            stats.publicationErrors = (stats.publicationErrors || 0) + 1;
+          }
+        }
       }
     } catch (err) {
       stats.failed++;
@@ -1733,6 +1995,13 @@ export async function applyCollections(
   logger.info(
     `✓ Applied ${stats.total} collections: ${stats.created} created, ${stats.updated} updated, ${stats.failed} failed`
   );
+  if (stats.publicationsSynced) {
+    logger.info(
+      `  Publications synced: ${stats.publicationsSynced} collections${
+        stats.publicationErrors ? ` (${stats.publicationErrors} errors)` : ""
+      }`
+    );
+  }
 
   return ok(stats);
 }

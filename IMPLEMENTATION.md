@@ -179,6 +179,22 @@
      - Handle both single and list file references
      - Integrated into metaobject apply workflow
 
+1. **Publications** (`packages/core/src/migration/`) ✨ **COMPLETE & IDEMPOTENT**
+
+   - ✅ **Sales channel visibility for products and collections** ✨ **NEW**
+
+     - Dump publications from source (Online Store, Shop, POS, Inbox, custom channels)
+     - Separate GraphQL queries after bulk dump (to avoid connection limits)
+     - Build publication index (channel name → destination GID)
+     - **Idempotent sync workflow:** ✨ **NEW**
+       - Unpublish from ALL destination channels first (clean slate)
+       - Publish ONLY to channels matching source
+       - Safe to re-run - always matches source state
+     - Track stats: publications synced per resource
+     - Integrated into `data:dump` and `data:apply` workflow
+     - **Files**: Included in `products.jsonl` and `collections.jsonl`
+     - **Pattern**: Channel name-based matching, deterministic
+
 1. **Drop Operations** (`packages/core/src/drop/`) ✨ **PARTIAL**
 
    - ✅ `files.ts` - Delete all files from destination (120 lines): ✨ **IMPLEMENTED**
@@ -275,21 +291,32 @@
    - **Files**: `files.jsonl`
    - **Pattern**: Filename-based matching, safe to re-run
 
-4. **Progress Tracking** (Future Enhancement)
+4. ~~**Publications (Sales Channels)**~~ ✅ **COMPLETED**
+
+   - ✅ Dump publication visibility from source (products & collections)
+   - ✅ Build publication index (channel name → GID)
+   - ✅ **Idempotent sync workflow (unpublish all, then publish to matching)** ✨ **NEW**
+   - ✅ Support for all channel types (Online Store, Shop, POS, Inbox, custom)
+   - ✅ Integrated into `data:dump` and `data:apply` workflow
+   - ✅ **Stats tracking: publications synced per resource** ✨ **NEW**
+   - **Files**: Included in `products.jsonl` and `collections.jsonl`
+   - **Pattern**: Channel name-based matching, deterministic
+
+5. **Progress Tracking** (Future Enhancement)
 
    - 🔲 Progress bars for long operations
    - 🔲 Real-time status updates
    - 🔲 ETA calculations
    - **Current**: Logger provides visibility, but no visual progress
 
-5. **Validation**
+6. **Validation**
 
    - 🔲 Pre-flight checks before apply
    - 🔲 Validate definition compatibility
    - 🔲 Warn on potential issues
    - **Current**: Errors reported after-the-fact in stats
 
-6. **Testing**
+7. **Testing**
    - 🔲 Unit tests for mappers and parsers
    - 🔲 Snapshot tests for transformations
    - 🔲 Integration tests with mock GraphQL

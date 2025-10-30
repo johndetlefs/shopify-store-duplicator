@@ -65,12 +65,24 @@ interface Reference {
   url?: string; // for files
 }
 
+interface PublicationEdge {
+  node: {
+    publication: {
+      id: string;
+      name: string;
+    };
+    publishDate?: string;
+    isPublished: boolean;
+  };
+}
+
 interface ProductNode {
   id: string;
   handle: string;
   title: string;
   descriptionHtml?: string;
   status: string;
+  publications?: PublicationEdge[];
   metafields?: MetafieldEdge[];
   variants?: VariantEdge[];
 }
@@ -102,6 +114,7 @@ interface CollectionNode {
   handle: string;
   title: string;
   descriptionHtml?: string;
+  publications?: PublicationEdge[];
   metafields?: MetafieldEdge[];
 }
 
@@ -195,6 +208,16 @@ interface DumpedProduct {
     position: number;
     values: string[];
   }>;
+  publications?: Array<{
+    node: {
+      publication: {
+        id: string;
+        name: string;
+      };
+      publishDate?: string;
+      isPublished: boolean;
+    };
+  }>;
   media?: Array<{
     id: string;
     url: string;
@@ -260,6 +283,16 @@ interface DumpedCollection {
   title: string;
   descriptionHtml?: string;
   ruleSet?: any; // Collection rules for automated collections
+  publications?: Array<{
+    node: {
+      publication: {
+        id: string;
+        name: string;
+      };
+      publishDate?: string;
+      isPublished: boolean;
+    };
+  }>;
   metafields: DumpedMetafield[];
 }
 
@@ -877,6 +910,7 @@ export async function dumpProducts(
             position: opt.position,
             values: opt.values,
           })),
+          publications: obj.resourcePublications?.edges || [],
           media: [],
           metafields: [],
           variants: [],
@@ -1034,6 +1068,36 @@ export async function dumpProducts(
   // Convert to array
   const transformed = Array.from(productsMap.values());
 
+  // Fetch publications for each product (done separately to avoid bulk query connection limit)
+  logger.info(`Fetching publications for ${transformed.length} products...`);
+  let publicationsFetched = 0;
+  for (const product of transformed) {
+    try {
+      const { PRODUCT_PUBLICATIONS_QUERY } = await import(
+        "../graphql/queries.js"
+      );
+      const result = await client.request({
+        query: PRODUCT_PUBLICATIONS_QUERY,
+        variables: { id: product.id },
+      });
+
+      if (result.ok && result.data.data?.product?.resourcePublications?.edges) {
+        product.publications =
+          result.data.data.product.resourcePublications.edges;
+        publicationsFetched++;
+      }
+    } catch (error) {
+      logger.debug(
+        `Failed to fetch publications for product ${product.handle}`,
+        {
+          error: String(error),
+        }
+      );
+      // Continue - publications are optional
+    }
+  }
+  logger.info(`✓ Fetched publications for ${publicationsFetched} products`);
+
   // Write to file
   const outputFile = path.join(outputDir, "products.jsonl");
   const content = transformed.map((obj) => JSON.stringify(obj)).join("\n");
@@ -1085,6 +1149,7 @@ export async function dumpCollections(
           handle: obj.handle,
           title: obj.title,
           descriptionHtml: obj.descriptionHtml,
+          publications: obj.resourcePublications?.edges || [],
           metafields: [],
         };
         // Include ruleSet if present (for automated collections)
@@ -1169,6 +1234,39 @@ export async function dumpCollections(
 
   // Convert to array
   const transformed = Array.from(collectionsMap.values());
+
+  // Fetch publications for each collection (done separately to avoid bulk query connection limit)
+  logger.info(`Fetching publications for ${transformed.length} collections...`);
+  let publicationsFetched = 0;
+  for (const collection of transformed) {
+    try {
+      const { COLLECTION_PUBLICATIONS_QUERY } = await import(
+        "../graphql/queries.js"
+      );
+      const result = await client.request({
+        query: COLLECTION_PUBLICATIONS_QUERY,
+        variables: { id: collection.id },
+      });
+
+      if (
+        result.ok &&
+        result.data.data?.collection?.resourcePublications?.edges
+      ) {
+        collection.publications =
+          result.data.data.collection.resourcePublications.edges;
+        publicationsFetched++;
+      }
+    } catch (error) {
+      logger.debug(
+        `Failed to fetch publications for collection ${collection.handle}`,
+        {
+          error: String(error),
+        }
+      );
+      // Continue - publications are optional
+    }
+  }
+  logger.info(`✓ Fetched publications for ${publicationsFetched} collections`);
 
   // Write to file
   const outputFile = path.join(outputDir, "collections.jsonl");

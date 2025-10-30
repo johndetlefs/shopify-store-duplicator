@@ -19,6 +19,7 @@ import {
   BLOGS_HANDLES_QUERY,
   ARTICLES_HANDLES_QUERY,
   METAOBJECTS_HANDLES_QUERY,
+  PUBLICATIONS_QUERY,
 } from "../graphql/queries.js";
 
 export interface DestinationIndex {
@@ -29,6 +30,7 @@ export interface DestinationIndex {
   articles: Map<string, string>; // {blogHandle}:{articleHandle} → GID
   metaobjects: Map<string, string>; // {type}:{handle} → GID
   variants: Map<string, string>; // {productHandle}:{sku|position} → GID
+  publications: Map<string, string>; // publication name → GID
 }
 
 /**
@@ -48,6 +50,7 @@ export async function buildDestinationIndex(
     articles: new Map(),
     metaobjects: new Map(),
     variants: new Map(),
+    publications: new Map(),
   };
 
   // Index products
@@ -167,6 +170,22 @@ export async function buildDestinationIndex(
   }
   logger.debug(`Indexed ${index.articles.size} articles`);
 
+  // Index publications (sales channels)
+  logger.debug("Indexing publications");
+  for await (const publication of client.paginate(
+    PUBLICATIONS_QUERY,
+    {},
+    {
+      getEdges: (data) => data.publications.edges,
+      getPageInfo: (data) => data.publications.pageInfo,
+    }
+  )) {
+    if (publication.name) {
+      index.publications.set(publication.name, publication.id);
+    }
+  }
+  logger.debug(`Indexed ${index.publications.size} publications`);
+
   logger.info("Destination index built", {
     products: index.products.size,
     variants: index.variants.size,
@@ -174,6 +193,7 @@ export async function buildDestinationIndex(
     pages: index.pages.size,
     blogs: index.blogs.size,
     articles: index.articles.size,
+    publications: index.publications.size,
   });
 
   return index;

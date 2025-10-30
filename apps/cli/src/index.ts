@@ -30,11 +30,16 @@ import {
   dumpProducts,
   dumpCollections,
   dumpPages,
+  dumpBlogs,
+  dumpArticles,
   applyAllData,
   applyMetaobjects,
   applyProductMetafields,
   applyCollectionMetafields,
   applyPageMetafields,
+  applyPages,
+  applyBlogs,
+  applyArticles,
   diffData,
   buildDestinationIndex,
   applyFiles,
@@ -168,7 +173,7 @@ program
 program
   .command("defs:dump")
   .description("Dump metaobject and metafield definitions from source store")
-  .option("-o, --output <file>", "Output file", "data/source-defs.json")
+  .option("-o, --output <file>", "Output file", "./dumps/definitions.json")
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -217,7 +222,7 @@ program
   .description(
     "Apply metaobject and metafield definitions to destination store"
   )
-  .option("-f, --file <file>", "Input file", "data/source-defs.json")
+  .option("-f, --file <file>", "Input file", "./dumps/definitions.json")
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -284,22 +289,6 @@ program
     }
   });
 
-// defs:diff - Compare definitions
-program
-  .command("defs:diff")
-  .description("Compare source definitions with destination store")
-  .option("-f, --file <file>", "Source definitions file")
-  .action(async (options) => {
-    const globalOpts = program.opts();
-
-    if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
-    }
-
-    logger.warn("defs:diff not yet implemented");
-    process.exit(1);
-  });
-
 /**
  * DATA COMMANDS
  */
@@ -307,11 +296,13 @@ program
 program
   .command("data:dump")
   .description("Dump metaobjects, metafields, and CMS content from source")
-  .option("-o, --output <dir>", "Output directory", "data/dumps")
+  .option("-o, --output <dir>", "Output directory", "./dumps")
   .option("--metaobjects-only", "Dump only metaobjects", false)
   .option("--products-only", "Dump only products", false)
   .option("--collections-only", "Dump only collections", false)
   .option("--pages-only", "Dump only pages", false)
+  .option("--blogs-only", "Dump only blogs", false)
+  .option("--articles-only", "Dump only articles", false)
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -346,6 +337,10 @@ program
       result = await dumpCollections(client, outputDir);
     } else if (options.pagesOnly) {
       result = await dumpPages(client, outputDir);
+    } else if (options.blogsOnly) {
+      result = await dumpBlogs(client, outputDir);
+    } else if (options.articlesOnly) {
+      result = await dumpArticles(client, outputDir);
     } else {
       // Dump everything
       result = await dumpAllData(client, outputDir);
@@ -362,7 +357,7 @@ program
 program
   .command("data:apply")
   .description("Apply data to destination store")
-  .option("-i, --input <dir>", "Input directory", "data/dumps")
+  .option("-i, --input <dir>", "Input directory", "./dumps")
   .option("--products-only", "Apply products only")
   .option("--collections-only", "Apply collections only")
   .option("--metaobjects-only", "Apply metaobjects only")
@@ -399,6 +394,73 @@ program
 
     logger.info(`Applying data from ${inputDir} to destination store`);
 
+    // Handle selective application for CMS content types
+    if (options.pagesOnly || options.blogsOnly || options.articlesOnly) {
+      // Build destination index first
+      logger.info("Building destination index...");
+      const index = await buildDestinationIndex(client);
+
+      let result: any;
+
+      if (options.pagesOnly) {
+        const pagesFile = `${inputDir}/pages.jsonl`;
+        result = await applyPages(client, pagesFile, index);
+        
+        if (!result.ok) {
+          logger.error("Pages apply failed", { error: result.error.message });
+          process.exit(1);
+        }
+
+        logger.info("\n=== Pages Apply Complete ===");
+        console.log(formatStatsTable("Pages", result.data));
+        
+        if (result.data.errors.length > 0) {
+          logger.warn("Page errors:", result.data.errors.slice(0, 10));
+        }
+        
+        return;
+      }
+
+      if (options.blogsOnly) {
+        const blogsFile = `${inputDir}/blogs.jsonl`;
+        result = await applyBlogs(client, blogsFile, index);
+        
+        if (!result.ok) {
+          logger.error("Blogs apply failed", { error: result.error.message });
+          process.exit(1);
+        }
+
+        logger.info("\n=== Blogs Apply Complete ===");
+        console.log(formatStatsTable("Blogs", result.data));
+        
+        if (result.data.errors.length > 0) {
+          logger.warn("Blog errors:", result.data.errors.slice(0, 10));
+        }
+        
+        return;
+      }
+
+      if (options.articlesOnly) {
+        const articlesFile = `${inputDir}/articles.jsonl`;
+        result = await applyArticles(client, articlesFile, index);
+        
+        if (!result.ok) {
+          logger.error("Articles apply failed", { error: result.error.message });
+          process.exit(1);
+        }
+
+        logger.info("\n=== Articles Apply Complete ===");
+        console.log(formatStatsTable("Articles", result.data));
+        
+        if (result.data.errors.length > 0) {
+          logger.warn("Article errors:", result.data.errors.slice(0, 10));
+        }
+        
+        return;
+      }
+    }
+
+    // Full or partial application using applyAllData
     const result = await applyAllData(client, inputDir, {
       productsOnly: options.productsOnly,
       collectionsOnly: options.collectionsOnly,
@@ -559,14 +621,12 @@ program
     }
   });
 
+/**
+ * FILES COMMANDS
+ */
+
 program
-  .command("data:diff")
-  .description("Compare source data with destination")
-  .option("-i, --input <dir>", "Input directory", "./dumps")
-  .action(async (options) => {
-    logger.warn("data:diff not yet implemented");
-    process.exit(1);
-  });
+  .command("files:apply")
 
 /**
  * FILES COMMANDS
@@ -750,7 +810,7 @@ program
 program
   .command("menus:dump")
   .description("Dump menus from source store")
-  .option("-o, --output <file>", "Output file", "data/menus.json")
+  .option("-o, --output <file>", "Output file", "./dumps/menus.json")
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -787,7 +847,7 @@ program
 program
   .command("menus:apply")
   .description("Apply menus to destination store")
-  .option("-f, --file <file>", "Input file", "data/menus.json")
+  .option("-f, --file <file>", "Input file", "./dumps/menus.json")
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -858,7 +918,7 @@ program
 program
   .command("redirects:dump")
   .description("Dump redirects from source store")
-  .option("-o, --output <file>", "Output file", "data/redirects.json")
+  .option("-o, --output <file>", "Output file", "./dumps/redirects.json")
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -895,7 +955,7 @@ program
 program
   .command("redirects:apply")
   .description("Apply redirects to destination store")
-  .option("-f, --file <file>", "Input file", "data/redirects.json")
+  .option("-f, --file <file>", "Input file", "./dumps/redirects.json")
   .action(async (options) => {
     const globalOpts = program.opts();
 

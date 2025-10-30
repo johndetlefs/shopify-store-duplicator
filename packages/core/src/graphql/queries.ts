@@ -626,6 +626,7 @@ export const PAGES_BULK = `
           title
           body
           bodySummary
+          templateSuffix
           metafields(first: 250) {
             edges {
               node {
@@ -755,6 +756,7 @@ export const BLOGS_BULK = `
           id
           handle
           title
+          templateSuffix
           metafields(first: 250) {
             edges {
               node {
@@ -813,6 +815,11 @@ export const ARTICLES_BULK = `
           handle
           title
           body
+          templateSuffix
+          image {
+            altText
+            url
+          }
           blog {
             handle
           }

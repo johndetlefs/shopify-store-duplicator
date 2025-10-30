@@ -111,6 +111,7 @@ interface PageNode {
   title: string;
   body?: string;
   bodySummary?: string;
+  templateSuffix?: string;
   metafields?: MetafieldEdge[];
 }
 
@@ -118,6 +119,7 @@ interface BlogNode {
   id: string;
   handle: string;
   title: string;
+  templateSuffix?: string;
   metafields?: MetafieldEdge[];
 }
 
@@ -126,6 +128,11 @@ interface ArticleNode {
   handle: string;
   title: string;
   body?: string;
+  templateSuffix?: string;
+  image?: {
+    altText?: string;
+    url?: string;
+  };
   blog: {
     handle: string;
   };
@@ -262,6 +269,7 @@ interface DumpedPage {
   title: string;
   body?: string;
   bodySummary?: string;
+  templateSuffix?: string;
   metafields: DumpedMetafield[];
 }
 
@@ -269,6 +277,7 @@ interface DumpedBlog {
   id: string;
   handle: string;
   title: string;
+  templateSuffix?: string;
   metafields: DumpedMetafield[];
 }
 
@@ -277,6 +286,11 @@ interface DumpedArticle {
   handle: string;
   title: string;
   body?: string;
+  templateSuffix?: string;
+  image?: {
+    altText?: string;
+    url?: string;
+  };
   blogHandle: string;
   metafields: DumpedMetafield[];
 }
@@ -1206,6 +1220,7 @@ export async function dumpPages(
           title: obj.title,
           body: obj.body,
           bodySummary: obj.bodySummary,
+          templateSuffix: obj.templateSuffix,
           metafields: [],
         };
         pagesMap.set(obj.id, page);
@@ -1370,6 +1385,7 @@ export async function dumpBlogs(
           id: obj.id,
           handle: obj.handle,
           title: obj.title,
+          templateSuffix: obj.templateSuffix,
           metafields: [],
         };
         blogsMap.set(obj.id, blog);
@@ -1464,6 +1480,8 @@ export async function dumpArticles(
           handle: obj.handle,
           title: obj.title,
           body: obj.body,
+          templateSuffix: obj.templateSuffix,
+          image: obj.image,
           blogHandle: obj.blog?.handle || "",
           metafields: [],
         };

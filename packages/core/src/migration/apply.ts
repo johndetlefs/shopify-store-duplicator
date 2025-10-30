@@ -179,6 +179,7 @@ interface DumpedPage {
   title: string;
   body?: string;
   bodySummary?: string;
+  templateSuffix?: string;
   metafields: DumpedMetafield[];
 }
 
@@ -186,6 +187,7 @@ interface DumpedBlog {
   id: string;
   handle: string;
   title: string;
+  templateSuffix?: string;
   metafields: DumpedMetafield[];
 }
 
@@ -195,6 +197,11 @@ interface DumpedArticle {
   blogHandle: string;
   title: string;
   body?: string;
+  templateSuffix?: string;
+  image?: {
+    altText?: string;
+    url?: string;
+  };
   author?: string;
   tags?: string[];
   publishedAt?: string;
@@ -1778,6 +1785,7 @@ export async function applyPages(
             page: {
               title: page.title,
               body: page.body || "",
+              templateSuffix: page.templateSuffix || null,
               // Note: handle cannot be updated after creation
             },
           },
@@ -1819,6 +1827,7 @@ export async function applyPages(
               title: page.title,
               handle: page.handle,
               body: page.body || "",
+              templateSuffix: page.templateSuffix || null,
             },
           },
         });
@@ -1919,6 +1928,7 @@ export async function applyBlogs(
             id: existingGid,
             blog: {
               title: blog.title,
+              templateSuffix: blog.templateSuffix || null,
             },
           },
         });
@@ -1958,6 +1968,7 @@ export async function applyBlogs(
             blog: {
               title: blog.title,
               handle: blog.handle,
+              templateSuffix: blog.templateSuffix || null,
             },
           },
         });
@@ -2074,11 +2085,17 @@ export async function applyArticles(
           title: article.title,
           body: article.body || "",
           tags: article.tags || [],
+          templateSuffix: article.templateSuffix || null,
         };
 
         // Author is an object with a name property
         if (article.author) {
           articleInput.author = { name: article.author };
+        }
+
+        // Add image if present
+        if (article.image) {
+          articleInput.image = article.image;
         }
 
         const result = await client.request({
@@ -2138,7 +2155,13 @@ export async function applyArticles(
           author: article.author ? { name: article.author } : { name: "Staff" },
           tags: article.tags || [],
           publishedAt: article.publishedAt,
+          templateSuffix: article.templateSuffix || null,
         };
+
+        // Add image if present
+        if (article.image) {
+          articleInput.image = article.image;
+        }
 
         const result = await client.request({
           query: ARTICLE_CREATE,

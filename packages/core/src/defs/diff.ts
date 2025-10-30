@@ -42,7 +42,11 @@ export interface DefinitionDiffResult {
     // Usage of reserved metafields in data dumps
     productsUsingReserved: Array<{ handle: string; metafields: string[] }>;
     collectionsUsingReserved: Array<{ handle: string; metafields: string[] }>;
-    metaobjectsUsingReserved: Array<{ type: string; handle: string; metafields: string[] }>;
+    metaobjectsUsingReserved: Array<{
+      type: string;
+      handle: string;
+      metafields: string[];
+    }>;
   };
   summary: {
     totalIssues: number;
@@ -126,9 +130,13 @@ export async function diffDefinitions(
     // Check if reserved metafields are being used in data dumps
     let reservedUsage;
     if (options?.checkDataUsage && metafieldDiff.missingReserved.length > 0) {
-      const dumpsDir = options.dumpsDir || sourceDumpFile.replace(/\/[^/]+$/, "");
+      const dumpsDir =
+        options.dumpsDir || sourceDumpFile.replace(/\/[^/]+$/, "");
       logger.info("Checking data dumps for reserved metafield usage...");
-      reservedUsage = checkReservedMetafieldUsage(dumpsDir, metafieldDiff.missingReserved);
+      reservedUsage = checkReservedMetafieldUsage(
+        dumpsDir,
+        metafieldDiff.missingReserved
+      );
     }
 
     const result: DefinitionDiffResult = {
@@ -355,11 +363,23 @@ function checkReservedMetafieldUsage(
 ): {
   productsUsingReserved: Array<{ handle: string; metafields: string[] }>;
   collectionsUsingReserved: Array<{ handle: string; metafields: string[] }>;
-  metaobjectsUsingReserved: Array<{ type: string; handle: string; metafields: string[] }>;
+  metaobjectsUsingReserved: Array<{
+    type: string;
+    handle: string;
+    metafields: string[];
+  }>;
 } {
-  const productsUsingReserved: Array<{ handle: string; metafields: string[] }> = [];
-  const collectionsUsingReserved: Array<{ handle: string; metafields: string[] }> = [];
-  const metaobjectsUsingReserved: Array<{ type: string; handle: string; metafields: string[] }> = [];
+  const productsUsingReserved: Array<{ handle: string; metafields: string[] }> =
+    [];
+  const collectionsUsingReserved: Array<{
+    handle: string;
+    metafields: string[];
+  }> = [];
+  const metaobjectsUsingReserved: Array<{
+    type: string;
+    handle: string;
+    metafields: string[];
+  }> = [];
 
   // Extract namespace/key pairs from reserved triplets
   const reservedPairs = new Set(
@@ -377,12 +397,12 @@ function checkReservedMetafieldUsage(
   if (fs.existsSync(productsFile)) {
     const content = fs.readFileSync(productsFile, "utf-8");
     const lines = content.split("\n").filter((l) => l.trim());
-    
+
     for (const line of lines) {
       try {
         const product = JSON.parse(line);
         const reservedMetafields: string[] = [];
-        
+
         if (product.metafields) {
           for (const mf of product.metafields) {
             if (isReservedMetafield(mf.namespace, mf.key)) {
@@ -390,7 +410,7 @@ function checkReservedMetafieldUsage(
             }
           }
         }
-        
+
         if (reservedMetafields.length > 0) {
           productsUsingReserved.push({
             handle: product.handle,
@@ -408,12 +428,12 @@ function checkReservedMetafieldUsage(
   if (fs.existsSync(collectionsFile)) {
     const content = fs.readFileSync(collectionsFile, "utf-8");
     const lines = content.split("\n").filter((l) => l.trim());
-    
+
     for (const line of lines) {
       try {
         const collection = JSON.parse(line);
         const reservedMetafields: string[] = [];
-        
+
         if (collection.metafields) {
           for (const mf of collection.metafields) {
             if (isReservedMetafield(mf.namespace, mf.key)) {
@@ -421,7 +441,7 @@ function checkReservedMetafieldUsage(
             }
           }
         }
-        
+
         if (reservedMetafields.length > 0) {
           collectionsUsingReserved.push({
             handle: collection.handle,

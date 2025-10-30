@@ -1105,13 +1105,13 @@ program
               diff.reservedUsage.productsUsingReserved
                 .slice(0, 5)
                 .forEach(({ handle, metafields }) =>
-                  logger.warn(
-                    `      ${handle} (${metafields.join(", ")})`
-                  )
+                  logger.warn(`      ${handle} (${metafields.join(", ")})`)
                 );
               if (diff.reservedUsage.productsUsingReserved.length > 5) {
                 logger.warn(
-                  `      ... and ${diff.reservedUsage.productsUsingReserved.length - 5} more`
+                  `      ... and ${
+                    diff.reservedUsage.productsUsingReserved.length - 5
+                  } more`
                 );
               }
             }
@@ -1123,13 +1123,13 @@ program
               diff.reservedUsage.collectionsUsingReserved
                 .slice(0, 5)
                 .forEach(({ handle, metafields }) =>
-                  logger.warn(
-                    `      ${handle} (${metafields.join(", ")})`
-                  )
+                  logger.warn(`      ${handle} (${metafields.join(", ")})`)
                 );
               if (diff.reservedUsage.collectionsUsingReserved.length > 5) {
                 logger.warn(
-                  `      ... and ${diff.reservedUsage.collectionsUsingReserved.length - 5} more`
+                  `      ... and ${
+                    diff.reservedUsage.collectionsUsingReserved.length - 5
+                  } more`
                 );
               }
             }

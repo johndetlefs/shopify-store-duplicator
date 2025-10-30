@@ -423,7 +423,6 @@ npm run clean
 - **SETUP.md** - Detailed installation and configuration guide
 - **QUICK_REFERENCE.md** - Command cheat sheet
 - **IMPLEMENTATION.md** - Technical implementation details and roadmap
-- **docs/IDEMPOTENT_FILES.md** - File idempotency implementation guide
 - **.github/copilot-instructions.md** - AI coding assistant instructions
 
 ## Security

@@ -972,8 +972,8 @@ export const MENUS_QUERY = `
 `;
 
 export const MENU_CREATE = `
-  mutation menuCreate($menu: MenuCreateInput!) {
-    menuCreate(menu: $menu) {
+  mutation menuCreate($title: String!, $handle: String!, $items: [MenuItemCreateInput!]!) {
+    menuCreate(title: $title, handle: $handle, items: $items) {
       menu {
         id
         handle
@@ -988,8 +988,8 @@ export const MENU_CREATE = `
 `;
 
 export const MENU_UPDATE = `
-  mutation menuUpdate($id: ID!, $menu: MenuInput!) {
-    menuUpdate(id: $id, menu: $menu) {
+  mutation menuUpdate($id: ID!, $title: String!, $handle: String, $items: [MenuItemUpdateInput!]!) {
+    menuUpdate(id: $id, title: $title, handle: $handle, items: $items) {
       menu {
         id
         handle

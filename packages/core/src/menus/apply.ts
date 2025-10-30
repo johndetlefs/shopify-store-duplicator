@@ -37,6 +37,8 @@ interface DumpedMenuItem {
   productHandle?: string;
   collectionHandle?: string;
   pageHandle?: string;
+  blogHandle?: string;
+  articleHandle?: string;
   items?: DumpedMenuItem[];
 }
 
@@ -49,7 +51,8 @@ interface DumpedMenu {
 interface MenuItemInput {
   title: string;
   url: string;
-  type?: string;
+  type: string;
+  resourceId?: string;
   items?: MenuItemInput[];
 }
 
@@ -68,7 +71,7 @@ interface ApplyStats {
 
 /**
  * Remap a menu item URL using the destination index.
- * If the item references a resource (product/collection/page), rebuild the URL
+ * If the item references a resource (product/collection/page/blog/article), rebuild the URL
  * with the destination shop's domain. Otherwise, keep URL as-is.
  */
 function remapMenuItemUrl(
@@ -89,6 +92,16 @@ function remapMenuItemUrl(
     return `/pages/${item.pageHandle}`;
   }
 
+  if (item.blogHandle && index.blogs.has(item.blogHandle)) {
+    // For articles, need both blog and article handles
+    if (item.articleHandle) {
+      // Construct article URL: /blogs/{blogHandle}/{articleHandle}
+      return `/blogs/${item.blogHandle}/${item.articleHandle}`;
+    }
+    // For blog-only links
+    return `/blogs/${item.blogHandle}`;
+  }
+
   // For other types (HTTP, FRONTPAGE, etc.) or if resource not found, use original URL
   // Note: External HTTP links will be preserved as-is
   return item.url;
@@ -105,7 +118,28 @@ function transformMenuItemForInput(
   const input: MenuItemInput = {
     title: item.title,
     url: remapMenuItemUrl(item, index, destinationShop),
+    type: item.type,
   };
+
+  // Add resourceId if we have a reference to a destination resource
+  if (item.productHandle && index.products.has(item.productHandle)) {
+    input.resourceId = index.products.get(item.productHandle);
+  } else if (
+    item.collectionHandle &&
+    index.collections.has(item.collectionHandle)
+  ) {
+    input.resourceId = index.collections.get(item.collectionHandle);
+  } else if (item.pageHandle && index.pages.has(item.pageHandle)) {
+    input.resourceId = index.pages.get(item.pageHandle);
+  } else if (item.blogHandle && index.blogs.has(item.blogHandle)) {
+    input.resourceId = index.blogs.get(item.blogHandle);
+  } else if (item.articleHandle && item.blogHandle) {
+    // Articles use composite key: {blogHandle}:{articleHandle}
+    const articleKey = `${item.blogHandle}:${item.articleHandle}`;
+    if (index.articles.has(articleKey)) {
+      input.resourceId = index.articles.get(articleKey);
+    }
+  }
 
   // Recursively transform nested items
   if (item.items && item.items.length > 0) {
@@ -207,10 +241,9 @@ export async function applyMenus(
           query: MENU_UPDATE,
           variables: {
             id: existingId,
-            menu: {
-              title: menu.title,
-              items,
-            },
+            title: menu.title,
+            handle: menu.handle,
+            items,
           },
         });
 
@@ -248,11 +281,9 @@ export async function applyMenus(
         const result = await client.request({
           query: MENU_CREATE,
           variables: {
-            menu: {
-              handle: menu.handle,
-              title: menu.title,
-              items,
-            },
+            title: menu.title,
+            handle: menu.handle,
+            items,
           },
         });
 

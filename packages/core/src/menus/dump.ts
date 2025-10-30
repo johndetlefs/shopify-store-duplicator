@@ -55,6 +55,8 @@ interface DumpedMenuItem {
   productHandle?: string;
   collectionHandle?: string;
   pageHandle?: string;
+  blogHandle?: string;
+  articleHandle?: string;
   items?: DumpedMenuItem[];
 }
 
@@ -72,11 +74,15 @@ function extractResourceFromUrl(
   productHandle?: string;
   collectionHandle?: string;
   pageHandle?: string;
+  blogHandle?: string;
+  articleHandle?: string;
 } {
   const result: {
     productHandle?: string;
     collectionHandle?: string;
     pageHandle?: string;
+    blogHandle?: string;
+    articleHandle?: string;
   } = {};
 
   // Menu item types: COLLECTION, PRODUCT, PAGE, BLOG, ARTICLE, HTTP, CATALOG, FRONTPAGE, SEARCH, SHOP_POLICY
@@ -111,7 +117,23 @@ function extractResourceFromUrl(
         }
         break;
 
-      // BLOG, ARTICLE - not yet implemented
+      case "BLOG":
+        // URL format: /blogs/{handle}
+        const blogMatch = pathname.match(/\/blogs\/([^/?]+)/);
+        if (blogMatch) {
+          result.blogHandle = blogMatch[1];
+        }
+        break;
+
+      case "ARTICLE":
+        // URL format: /blogs/{blogHandle}/{articleHandle}
+        const articleMatch = pathname.match(/\/blogs\/([^/]+)\/([^/?]+)/);
+        if (articleMatch) {
+          result.blogHandle = articleMatch[1];
+          result.articleHandle = articleMatch[2];
+        }
+        break;
+
       // HTTP - external link, no remapping needed
       // FRONTPAGE, CATALOG, SEARCH, SHOP_POLICY - no handle to extract
     }
@@ -139,6 +161,8 @@ function transformMenuItem(item: MenuItem): DumpedMenuItem {
   if (resource.collectionHandle)
     dumped.collectionHandle = resource.collectionHandle;
   if (resource.pageHandle) dumped.pageHandle = resource.pageHandle;
+  if (resource.blogHandle) dumped.blogHandle = resource.blogHandle;
+  if (resource.articleHandle) dumped.articleHandle = resource.articleHandle;
 
   // Recursively transform nested items
   if (item.items && item.items.length > 0) {

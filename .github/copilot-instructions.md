@@ -227,6 +227,7 @@ When working on this codebase:
 - Ensure idempotency for all write operations
 - Add comprehensive error handling with detailed stats
 - Test with real Shopify development stores
+- Check the Shopify admin graphql API documentation at https://shopify.dev/docs/api/admin-graphql to see what Shopify expects before creating queries or mutations
 - Update documentation in README.md, QUICK_REFERENCE.md, and IMPLEMENTATION.md
 - **DO NOT create summary files or high-level overviews unless specifically requested**
 - Focus on code changes and minimal documentation updates to existing files only

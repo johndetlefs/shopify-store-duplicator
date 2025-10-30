@@ -1022,6 +1022,10 @@ program
     "Source definitions file",
     "./dumps/definitions.json"
   )
+  .option(
+    "--no-usage-check",
+    "Skip checking data dumps for reserved metafield usage (faster)"
+  )
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -1042,9 +1046,16 @@ program
       apiVersion: globalOpts.apiVersion,
     });
 
-    logger.info(`Comparing definitions: ${options.file} vs destination store`);
+    // Resolve file path relative to workspace root
+    const filePath = resolveWorkspacePath(options.file);
+    const dumpsDir = resolveWorkspacePath("./dumps");
 
-    const result = await diffDefinitions(client, options.file);
+    logger.info(`Comparing definitions: ${filePath} vs destination store`);
+
+    const result = await diffDefinitions(client, filePath, {
+      checkDataUsage: options.usageCheck !== false, // Enabled by default, disabled with --no-usage-check
+      dumpsDir,
+    });
 
     if (!result.ok) {
       logger.error("Definitions diff failed", { error: result.error.message });
@@ -1057,9 +1068,90 @@ program
     logger.info("=== DEFINITIONS DIFF RESULTS ===");
 
     if (diff.summary.isIdentical) {
-      logger.info("✓ Definitions are identical!");
+      logger.info("✓ Custom definitions are identical!");
+
+      // Show reserved metafields even when identical
+      if (diff.metafields.missingReserved.length > 0) {
+        logger.info(
+          `\nℹ️  Shopify-reserved metafield definitions (${diff.metafields.missingReserved.length}) - system-managed, cannot be created via API:`
+        );
+        diff.metafields.missingReserved
+          .slice(0, 10)
+          .forEach((triplet) => logger.info(`  - ${triplet}`));
+        if (diff.metafields.missingReserved.length > 10) {
+          logger.info(
+            `  ... and ${diff.metafields.missingReserved.length - 10} more`
+          );
+        }
+        logger.info(
+          `  Note: These are automatically available in Shopify stores when needed.`
+        );
+
+        // Show usage information if available
+        if (diff.reservedUsage) {
+          const totalUsing =
+            diff.reservedUsage.productsUsingReserved.length +
+            diff.reservedUsage.collectionsUsingReserved.length;
+
+          if (totalUsing > 0) {
+            logger.warn(
+              `\n⚠️  Warning: ${totalUsing} resources are using reserved metafields:`
+            );
+
+            if (diff.reservedUsage.productsUsingReserved.length > 0) {
+              logger.warn(
+                `  - ${diff.reservedUsage.productsUsingReserved.length} products:`
+              );
+              diff.reservedUsage.productsUsingReserved
+                .slice(0, 5)
+                .forEach(({ handle, metafields }) =>
+                  logger.warn(
+                    `      ${handle} (${metafields.join(", ")})`
+                  )
+                );
+              if (diff.reservedUsage.productsUsingReserved.length > 5) {
+                logger.warn(
+                  `      ... and ${diff.reservedUsage.productsUsingReserved.length - 5} more`
+                );
+              }
+            }
+
+            if (diff.reservedUsage.collectionsUsingReserved.length > 0) {
+              logger.warn(
+                `  - ${diff.reservedUsage.collectionsUsingReserved.length} collections:`
+              );
+              diff.reservedUsage.collectionsUsingReserved
+                .slice(0, 5)
+                .forEach(({ handle, metafields }) =>
+                  logger.warn(
+                    `      ${handle} (${metafields.join(", ")})`
+                  )
+                );
+              if (diff.reservedUsage.collectionsUsingReserved.length > 5) {
+                logger.warn(
+                  `      ... and ${diff.reservedUsage.collectionsUsingReserved.length - 5} more`
+                );
+              }
+            }
+
+            logger.warn(
+              `  These metafields should still work when applying data (Shopify manages them).`
+            );
+          } else {
+            logger.info(
+              `  ✓ No products or collections are using these reserved metafields.`
+            );
+          }
+        }
+      }
     } else {
-      logger.warn(`Found ${diff.summary.totalIssues} differences`);
+      if (diff.summary.totalActionable > 0) {
+        logger.warn(
+          `Found ${diff.summary.totalActionable} actionable differences`
+        );
+      } else {
+        logger.info("✓ Custom definitions are identical!");
+      }
 
       // Metaobject differences
       if (diff.metaobjects.missing.length > 0) {
@@ -1086,7 +1178,7 @@ program
         });
       }
 
-      // Metafield differences
+      // Metafield differences (custom namespaces only)
       if (diff.metafields.missing.length > 0) {
         logger.warn(
           `\n❌ Missing metafield definitions (${diff.metafields.missing.length}):`
@@ -1124,7 +1216,27 @@ program
         }
       }
 
-      process.exit(1);
+      // Shopify-reserved metafield definitions (informational only)
+      if (diff.metafields.missingReserved.length > 0) {
+        logger.info(
+          `\nℹ️  Shopify-reserved metafield definitions (${diff.metafields.missingReserved.length}) - system-managed, cannot be created via API:`
+        );
+        diff.metafields.missingReserved
+          .slice(0, 10)
+          .forEach((triplet) => logger.info(`  - ${triplet}`));
+        if (diff.metafields.missingReserved.length > 10) {
+          logger.info(
+            `  ... and ${diff.metafields.missingReserved.length - 10} more`
+          );
+        }
+        logger.info(
+          `  Note: These are automatically available in Shopify stores when needed.`
+        );
+      }
+
+      if (diff.summary.totalActionable > 0) {
+        process.exit(1);
+      }
     }
   });
 

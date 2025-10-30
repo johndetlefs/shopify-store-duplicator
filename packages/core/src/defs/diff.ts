@@ -34,11 +34,19 @@ export interface DefinitionDiffResult {
   };
   metafields: {
     missing: string[]; // Triplets missing in destination
+    missingReserved: string[]; // Shopify-reserved triplets (cannot be created via API)
     extra: string[]; // Triplets in destination but not in source
     changed: Array<{ triplet: string; changes: string[] }>; // Definitions with differences
   };
+  reservedUsage?: {
+    // Usage of reserved metafields in data dumps
+    productsUsingReserved: Array<{ handle: string; metafields: string[] }>;
+    collectionsUsingReserved: Array<{ handle: string; metafields: string[] }>;
+    metaobjectsUsingReserved: Array<{ type: string; handle: string; metafields: string[] }>;
+  };
   summary: {
     totalIssues: number;
+    totalActionable: number; // Issues excluding reserved namespaces
     isIdentical: boolean;
   };
 }
@@ -48,7 +56,8 @@ export interface DefinitionDiffResult {
  */
 export async function diffDefinitions(
   destinationClient: GraphQLClient,
-  sourceDumpFile: string
+  sourceDumpFile: string,
+  options?: { checkDataUsage?: boolean; dumpsDir?: string }
 ): Promise<Result<DefinitionDiffResult>> {
   logger.info("Starting definitions diff...");
 
@@ -102,20 +111,40 @@ export async function diffDefinitions(
       metaobjectDiff.extra.length +
       metaobjectDiff.changed.length +
       metafieldDiff.missing.length +
+      metafieldDiff.missingReserved.length +
       metafieldDiff.extra.length +
       metafieldDiff.changed.length;
+
+    const totalActionable =
+      metaobjectDiff.missing.length +
+      metaobjectDiff.extra.length +
+      metaobjectDiff.changed.length +
+      metafieldDiff.missing.length +
+      metafieldDiff.extra.length +
+      metafieldDiff.changed.length;
+
+    // Check if reserved metafields are being used in data dumps
+    let reservedUsage;
+    if (options?.checkDataUsage && metafieldDiff.missingReserved.length > 0) {
+      const dumpsDir = options.dumpsDir || sourceDumpFile.replace(/\/[^/]+$/, "");
+      logger.info("Checking data dumps for reserved metafield usage...");
+      reservedUsage = checkReservedMetafieldUsage(dumpsDir, metafieldDiff.missingReserved);
+    }
 
     const result: DefinitionDiffResult = {
       metaobjects: metaobjectDiff,
       metafields: metafieldDiff,
+      reservedUsage,
       summary: {
         totalIssues,
-        isIdentical: totalIssues === 0,
+        totalActionable,
+        isIdentical: totalActionable === 0,
       },
     };
 
     logger.info("Definitions diff complete", {
       totalIssues,
+      totalActionable,
       isIdentical: result.summary.isIdentical,
     });
 
@@ -235,11 +264,17 @@ function compareMetafieldDefinitions(
   destination: MetafieldDefinition[]
 ): {
   missing: string[];
+  missingReserved: string[];
   extra: string[];
   changed: Array<{ triplet: string; changes: string[] }>;
 } {
   const getTriplet = (def: MetafieldDefinition) =>
     `${def.ownerType}/${def.namespace}/${def.key}`;
+
+  const isReserved = (def: MetafieldDefinition) =>
+    def.namespace.startsWith("shopify--") ||
+    def.namespace === "shopify" ||
+    def.namespace === "reviews";
 
   const sourceByTriplet = new Map(source.map((def) => [getTriplet(def), def]));
   const destByTriplet = new Map(
@@ -247,13 +282,18 @@ function compareMetafieldDefinitions(
   );
 
   const missing: string[] = [];
+  const missingReserved: string[] = [];
   const extra: string[] = [];
   const changed: Array<{ triplet: string; changes: string[] }> = [];
 
-  // Find missing
-  for (const triplet of sourceByTriplet.keys()) {
+  // Find missing (separate reserved vs custom)
+  for (const [triplet, def] of sourceByTriplet.entries()) {
     if (!destByTriplet.has(triplet)) {
-      missing.push(triplet);
+      if (isReserved(def)) {
+        missingReserved.push(triplet);
+      } else {
+        missing.push(triplet);
+      }
     }
   }
 
@@ -277,7 +317,7 @@ function compareMetafieldDefinitions(
     }
   }
 
-  return { missing, extra, changed };
+  return { missing, missingReserved, extra, changed };
 }
 
 /**
@@ -304,4 +344,99 @@ function compareMetafieldDefinition(
   }
 
   return changes;
+}
+
+/**
+ * Check if reserved metafields are being used in data dumps
+ */
+function checkReservedMetafieldUsage(
+  dumpsDir: string,
+  reservedTriplets: string[]
+): {
+  productsUsingReserved: Array<{ handle: string; metafields: string[] }>;
+  collectionsUsingReserved: Array<{ handle: string; metafields: string[] }>;
+  metaobjectsUsingReserved: Array<{ type: string; handle: string; metafields: string[] }>;
+} {
+  const productsUsingReserved: Array<{ handle: string; metafields: string[] }> = [];
+  const collectionsUsingReserved: Array<{ handle: string; metafields: string[] }> = [];
+  const metaobjectsUsingReserved: Array<{ type: string; handle: string; metafields: string[] }> = [];
+
+  // Extract namespace/key pairs from reserved triplets
+  const reservedPairs = new Set(
+    reservedTriplets.map((triplet) => {
+      const parts = triplet.split("/");
+      return `${parts[1]}/${parts[2]}`; // namespace/key
+    })
+  );
+
+  const isReservedMetafield = (namespace: string, key: string) =>
+    reservedPairs.has(`${namespace}/${key}`);
+
+  // Check products
+  const productsFile = `${dumpsDir}/products.jsonl`;
+  if (fs.existsSync(productsFile)) {
+    const content = fs.readFileSync(productsFile, "utf-8");
+    const lines = content.split("\n").filter((l) => l.trim());
+    
+    for (const line of lines) {
+      try {
+        const product = JSON.parse(line);
+        const reservedMetafields: string[] = [];
+        
+        if (product.metafields) {
+          for (const mf of product.metafields) {
+            if (isReservedMetafield(mf.namespace, mf.key)) {
+              reservedMetafields.push(`${mf.namespace}/${mf.key}`);
+            }
+          }
+        }
+        
+        if (reservedMetafields.length > 0) {
+          productsUsingReserved.push({
+            handle: product.handle,
+            metafields: reservedMetafields,
+          });
+        }
+      } catch (e) {
+        // Skip malformed lines
+      }
+    }
+  }
+
+  // Check collections
+  const collectionsFile = `${dumpsDir}/collections.jsonl`;
+  if (fs.existsSync(collectionsFile)) {
+    const content = fs.readFileSync(collectionsFile, "utf-8");
+    const lines = content.split("\n").filter((l) => l.trim());
+    
+    for (const line of lines) {
+      try {
+        const collection = JSON.parse(line);
+        const reservedMetafields: string[] = [];
+        
+        if (collection.metafields) {
+          for (const mf of collection.metafields) {
+            if (isReservedMetafield(mf.namespace, mf.key)) {
+              reservedMetafields.push(`${mf.namespace}/${mf.key}`);
+            }
+          }
+        }
+        
+        if (reservedMetafields.length > 0) {
+          collectionsUsingReserved.push({
+            handle: collection.handle,
+            metafields: reservedMetafields,
+          });
+        }
+      } catch (e) {
+        // Skip malformed lines
+      }
+    }
+  }
+
+  return {
+    productsUsingReserved,
+    collectionsUsingReserved,
+    metaobjectsUsingReserved,
+  };
 }

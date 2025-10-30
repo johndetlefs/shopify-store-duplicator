@@ -14,6 +14,7 @@
  * - files:apply - Seed files to destination
  * - menus:dump/apply - Handle menus
  * - redirects:dump/apply - Handle redirects
+ * - policies:dump/apply - Handle shop policies
  */
 
 import { Command } from "commander";
@@ -48,6 +49,8 @@ import {
   applyMenus,
   dumpRedirects,
   applyRedirects,
+  dumpPolicies,
+  applyPolicies,
   logger,
   type GraphQLClientConfig,
 } from "@shopify-duplicator/core";
@@ -85,6 +88,7 @@ function formatStatsTable(
     uploaded?: number;
     deleted?: number;
     skipped?: number;
+    automaticManagement?: number;
   }
 ): string {
   const lines: string[] = [];
@@ -103,6 +107,10 @@ function formatStatsTable(
     lines.push(`  Deleted:  ${stats.deleted.toString().padStart(6)}`);
   if (stats.skipped !== undefined)
     lines.push(`  Skipped:  ${stats.skipped.toString().padStart(6)}`);
+  if (stats.automaticManagement !== undefined)
+    lines.push(
+      `  Auto Mgmt: ${stats.automaticManagement.toString().padStart(5)}`
+    );
   if (stats.failed !== undefined)
     lines.push(`  Failed:   ${stats.failed.toString().padStart(6)}`);
 
@@ -1020,6 +1028,127 @@ program
       logger.warn(`${result.data.failed} redirects failed to apply`);
       process.exit(1);
     }
+  });
+
+program
+  .command("policies:dump")
+  .description("Dump shop policies from source store")
+  .option("-o, --output <file>", "Output file", "./dumps/policies.json")
+  .action(async (options) => {
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.srcShop || !globalOpts.srcToken) {
+      logger.error(
+        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.srcShop,
+      accessToken: globalOpts.srcToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    const outputPath = resolveWorkspacePath(options.output);
+
+    logger.info(`Dumping policies to ${outputPath}`);
+
+    const result = await dumpPolicies(client, outputPath);
+
+    if (!result.ok) {
+      logger.error("Policies dump failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    logger.info("✓ Policies dump complete");
+  });
+
+program
+  .command("policies:apply")
+  .description("Apply shop policies to destination store")
+  .option("-f, --file <file>", "Input file", "./dumps/policies.json")
+  .action(async (options) => {
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.dstShop || !globalOpts.dstToken) {
+      logger.error(
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.dstShop,
+      accessToken: globalOpts.dstToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    const filePath = resolveWorkspacePath(options.file);
+
+    if (globalOpts.dryRun) {
+      logger.info("[DRY RUN] Would apply policies from:", { filePath });
+      return;
+    }
+
+    logger.info(`Applying policies from ${filePath}`);
+
+    const result = await applyPolicies(client, filePath);
+
+    if (!result.ok) {
+      logger.error("Policies apply failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    // Format and display stats table
+    console.log(
+      formatStatsTable("Policies Apply Results", {
+        updated: result.data.updated,
+        skipped: result.data.skipped,
+        automaticManagement: result.data.automaticManagement,
+        failed: result.data.failed,
+      })
+    );
+
+    // Report automatic management policies separately
+    if (result.data.automaticManagement > 0) {
+      const autoMgmtPolicies = result.data.errors
+        .filter((e) => e.isAutomaticManagement)
+        .map((e) => e.policy);
+      logger.info(
+        `\nNote: ${result.data.automaticManagement} policy/policies have automatic management enabled and were not updated:`
+      );
+      autoMgmtPolicies.forEach((policy) => {
+        logger.info(`  - ${policy}`);
+      });
+      logger.info(
+        "\nTo update these policies, disable automatic management in Shopify Admin → Settings → Policies"
+      );
+    }
+
+    // Report actual errors (non-automatic management)
+    const realErrors = result.data.errors.filter(
+      (e) => !e.isAutomaticManagement
+    );
+    if (realErrors.length > 0) {
+      logger.warn("\nPolicy errors:", realErrors);
+    }
+
+    // Only exit with error if there are real failures (not automatic management)
+    if (result.data.failed > 0) {
+      logger.error(`\n${result.data.failed} policies failed to apply`);
+      process.exit(1);
+    }
+
+    logger.info("\n✓ Policies apply complete");
   });
 
 /**

@@ -12,6 +12,7 @@ Migrate **all custom data** from a source Shopify store to a destination store:
 - ✅ Files (media library with automatic relinking)
 - ✅ Navigation menus (with URL remapping)
 - ✅ URL redirects (SEO preservation)
+- ✅ Shop policies (refund, privacy, terms, shipping, contact)
 - ✅ Complete validation tools
 
 ## Why This Tool?
@@ -48,6 +49,8 @@ npm run cli -- menus:dump -o menus.json               # Export menus
 npm run cli -- menus:apply -f menus.json              # Import menus
 npm run cli -- redirects:dump -o redirects.json       # Export redirects
 npm run cli -- redirects:apply -f redirects.json      # Import redirects
+npm run cli -- policies:dump -o policies.json         # Export shop policies
+npm run cli -- policies:apply -f policies.json        # Import shop policies
 # OR for bulk imports (faster): --csv flag + manual import via Shopify Admin
 
 # 4. Validate
@@ -155,7 +158,16 @@ npm run cli -- redirects:dump --csv -o redirects.csv
 
 Preserves SEO by migrating all URL redirects. CSV import is significantly faster for bulk operations.
 
-### Step 7: Validate
+### Step 7: Export & Import Policies
+
+```bash
+npm run cli -- policies:dump -o policies.json
+npm run cli -- policies:apply -f policies.json
+```
+
+Migrates shop policies (refund, privacy, terms of service, shipping, contact information). Note: Some policies may require disabling "automatic management" in Shopify admin before they can be updated.
+
+### Step 8: Validate
 
 ```bash
 npm run cli -- defs:diff -f source-definitions.json
@@ -234,7 +246,7 @@ npm run cli -- data:dump --collections-only -o <dir>
 npm run cli -- data:dump --pages-only -o <dir>
 ```
 
-### Menus & Redirects
+### Menus, Redirects & Policies
 
 ```bash
 npm run cli -- menus:dump -o <file>       # Export menus
@@ -243,12 +255,19 @@ npm run cli -- menus:apply -f <file>      # Import menus
 npm run cli -- redirects:dump -o <file>   # Export redirects (JSON)
 npm run cli -- redirects:dump --csv -o <file>  # Export redirects as CSV (for manual import)
 npm run cli -- redirects:apply -f <file>  # Import redirects
+
+npm run cli -- policies:dump -o <file>    # Export shop policies (refund, privacy, terms, shipping, contact)
+npm run cli -- policies:apply -f <file>   # Import shop policies
 ```
 
 **CSV Import Option:**  
 For large numbers of redirects (1000+), use `--csv` flag to export as CSV, then import via:  
 **Shopify Admin → Content → URL Redirects → Import**  
 This is much faster than API-based import for bulk operations.
+
+**Policies Note:**  
+Some policies (like Privacy Policy) may have "automatic management" enabled in Shopify settings, which prevents manual updates. The tool will detect these and skip them gracefully (they won't cause the command to fail). Check the summary output to see which policies were affected by automatic management. To update these policies, disable automatic management in:  
+**Shopify Admin → Settings → Policies → [Policy Name] → Uncheck "Manage using Shopify's default policy"**
 
 ### Data Cleanup (Destructive)
 

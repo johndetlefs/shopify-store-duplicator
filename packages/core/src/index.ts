@@ -44,3 +44,7 @@ export * from "./menus/apply.js";
 // Redirects
 export * from "./redirects/dump.js";
 export * from "./redirects/apply.js";
+
+// Policies
+export * from "./policies/dump.js";
+export * from "./policies/apply.js";

@@ -1360,3 +1360,40 @@ export const RESOLVE_NODES_QUERY = `
     }
   }
 `;
+
+/**
+ * Shop Policies
+ */
+export const SHOP_POLICIES_QUERY = `
+  query {
+    shop {
+      shopPolicies {
+        type
+        body
+        url
+      }
+    }
+  }
+`;
+
+export type ShopPolicyType =
+  | "REFUND_POLICY"
+  | "PRIVACY_POLICY"
+  | "TERMS_OF_SERVICE"
+  | "SHIPPING_POLICY";
+
+export const SHOP_POLICY_UPDATE = `
+  mutation shopPolicyUpdate($shopPolicy: ShopPolicyInput!) {
+    shopPolicyUpdate(shopPolicy: $shopPolicy) {
+      shopPolicy {
+        type
+        body
+        url
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;

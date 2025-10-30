@@ -49,3 +49,7 @@ export * from "./redirects/apply.js";
 // Policies
 export * from "./policies/dump.js";
 export * from "./policies/apply.js";
+
+// Discounts
+export * from "./discounts/dump.js";
+export * from "./discounts/apply.js";

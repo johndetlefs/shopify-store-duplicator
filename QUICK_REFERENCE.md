@@ -79,6 +79,20 @@ npm run cli -- redirects:dump -o redirects.json # Export
 npm run cli -- redirects:apply -f redirects.json # Import
 ```
 
+### Policies
+
+```bash
+npm run cli -- policies:dump -o policies.json   # Export
+npm run cli -- policies:apply -f policies.json  # Import
+```
+
+### Discounts
+
+```bash
+npm run cli -- discounts:dump -o discounts.json # Export (automatic + code-based)
+npm run cli -- discounts:apply -f discounts.json # Import (with product/collection remapping)
+```
+
 ### Data Cleanup (Destructive)
 
 ```bash
@@ -124,7 +138,9 @@ npm run cli -- defs:apply -f defs.json --dry-run --verbose
 ✅ Shop metafields  
 ✅ Files (media library + auto-relinking, **100% idempotent**)  
 ✅ Navigation menus (with URL remapping)  
-✅ URL redirects
+✅ URL redirects  
+✅ Shop policies (refund, privacy, terms, shipping, contact)  
+✅ Discounts (automatic + code-based: Basic, BXGY, Free Shipping)
 
 **All operations are idempotent** - safe to re-run without creating duplicates.
 
@@ -142,7 +158,11 @@ After `data:dump -o ./dumps`:
 ├── blogs.jsonl                      # Blogs with metafields
 ├── articles.jsonl                   # Articles with content + metafields
 ├── shop-metafields.jsonl            # Shop-level metafields
-└── files.jsonl                      # Media library files
+├── files.jsonl                      # Media library files
+├── menus.json                       # Navigation menus
+├── redirects.json                   # URL redirects
+├── policies.json                    # Shop policies
+└── discounts.json                   # Discounts (automatic + code)
 ```
 
 Each `.jsonl` file contains one JSON object per line (newline-delimited JSON).
@@ -251,6 +271,16 @@ LOG_FORMAT=pretty                # pretty | json
     └─────────────────┘
               ↓
     ┌─────────────────┐
+    │  policies:dump  │
+    │  policies:apply │ Shop policies
+    └─────────────────┘
+              ↓
+    ┌─────────────────┐
+    │ discounts:dump  │
+    │ discounts:apply │ Promotions
+    └─────────────────┘
+              ↓
+    ┌─────────────────┐
     │  data:diff      │ Validate
     └─────────────────┘
               ↓
@@ -295,12 +325,16 @@ npm run cli -- defs:dump -o prod-defs.json
 npm run cli -- data:dump -o ./prod-dumps
 npm run cli -- menus:dump -o prod-menus.json
 npm run cli -- redirects:dump -o prod-redirects.json
+npm run cli -- policies:dump -o prod-policies.json
+npm run cli -- discounts:dump -o prod-discounts.json
 
 # 3. Import during maintenance window
 npm run cli -- defs:apply -f prod-defs.json
 npm run cli -- data:apply -i ./prod-dumps
 npm run cli -- menus:apply -f prod-menus.json
 npm run cli -- redirects:apply -f prod-redirects.json
+npm run cli -- policies:apply -f prod-policies.json
+npm run cli -- discounts:apply -f prod-discounts.json
 
 # 4. Validate everything
 npm run cli -- defs:diff -f prod-defs.json
@@ -478,6 +512,7 @@ read_content, write_content
 read_files, write_files
 read_navigation, write_navigation
 read_online_store_pages, write_online_store_pages
+read_discounts, write_discounts
 ```
 
 ## Security Checklist

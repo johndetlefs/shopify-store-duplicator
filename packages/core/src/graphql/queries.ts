@@ -786,12 +786,12 @@ export const BLOGS_BULK = `
                     node {
                       __typename
                       ... on Metaobject {
-                        id
+                    id
                         type
                         handle
                       }
                       ... on Product {
-                        id
+                    id
                         handle
                       }
                     }
@@ -852,12 +852,12 @@ export const ARTICLES_BULK = `
                     node {
                       __typename
                       ... on Metaobject {
-                        id
+                    id
                         type
                         handle
                       }
                       ... on Product {
-                        id
+                    id
                         handle
                       }
                     }
@@ -1497,6 +1497,340 @@ export const PUBLISHABLE_UNPUBLISH = `
       userErrors {
         field
         message
+      }
+    }
+  }
+`;
+
+/**
+ * Discounts - Bulk Query
+ * Fetches both automatic and code discounts with all configuration details
+ */
+
+// Split: Code Discounts Bulk Query (≤5 connections)
+export const DISCOUNTS_CODE_BULK = `
+{
+  codeDiscountNodes(first: 250) {
+    edges {
+      node {
+        id
+        codeDiscount {
+          __typename
+          ... on DiscountCodeBasic {
+            title status summary startsAt endsAt usageLimit appliesOncePerCustomer asyncUsageCount
+            codes(first: 250) { edges { node { code } } }
+          }
+          ... on DiscountCodeBxgy {
+            title status summary startsAt endsAt usageLimit appliesOncePerCustomer asyncUsageCount
+            codes(first: 250) { edges { node { code } } }
+          }
+          ... on DiscountCodeFreeShipping {
+            title status summary startsAt endsAt usageLimit appliesOncePerCustomer asyncUsageCount
+            codes(first: 250) { edges { node { code } } }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+// Split: Automatic Discounts Bulk Query (≤5 connections)
+export const DISCOUNTS_AUTOMATIC_BULK = `
+{
+  automaticDiscountNodes(first: 250) {
+    edges {
+      node {
+        id
+        automaticDiscount {
+          __typename
+          ... on DiscountAutomaticBasic {
+            title status summary startsAt endsAt
+          }
+          ... on DiscountAutomaticBxgy {
+            title status summary startsAt endsAt
+          }
+          ... on DiscountAutomaticFreeShipping {
+            title status summary startsAt endsAt
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+/**
+ * Discount Code Basic - Create
+ */
+export const DISCOUNT_CODE_BASIC_CREATE = `
+  mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
+    discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
+      codeDiscountNode {
+        id
+        codeDiscount {
+          ... on DiscountCodeBasic {
+            title
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Discount Code Basic - Update
+ */
+export const DISCOUNT_CODE_BASIC_UPDATE = `
+  mutation discountCodeBasicUpdate($id: ID!, $basicCodeDiscount: DiscountCodeBasicInput!) {
+    discountCodeBasicUpdate(id: $id, basicCodeDiscount: $basicCodeDiscount) {
+      codeDiscountNode {
+        id
+        codeDiscount {
+          ... on DiscountCodeBasic {
+            title
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Discount Code BXGY - Create
+ */
+export const DISCOUNT_CODE_BXGY_CREATE = `
+  mutation discountCodeBxgyCreate($bxgyCodeDiscount: DiscountCodeBxgyInput!) {
+    discountCodeBxgyCreate(bxgyCodeDiscount: $bxgyCodeDiscount) {
+      codeDiscountNode {
+        id
+        codeDiscount {
+          ... on DiscountCodeBxgy {
+            title
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Discount Code BXGY - Update
+ */
+export const DISCOUNT_CODE_BXGY_UPDATE = `
+  mutation discountCodeBxgyUpdate($id: ID!, $bxgyCodeDiscount: DiscountCodeBxgyInput!) {
+    discountCodeBxgyUpdate(id: $id, bxgyCodeDiscount: $bxgyCodeDiscount) {
+      codeDiscountNode {
+        id
+        codeDiscount {
+          ... on DiscountCodeBxgy {
+            title
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Discount Code Free Shipping - Create
+ */
+export const DISCOUNT_CODE_FREE_SHIPPING_CREATE = `
+  mutation discountCodeFreeShippingCreate($freeShippingCodeDiscount: DiscountCodeFreeShippingInput!) {
+    discountCodeFreeShippingCreate(freeShippingCodeDiscount: $freeShippingCodeDiscount) {
+      codeDiscountNode {
+        id
+        codeDiscount {
+          ... on DiscountCodeFreeShipping {
+            title
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Discount Code Free Shipping - Update
+ */
+export const DISCOUNT_CODE_FREE_SHIPPING_UPDATE = `
+  mutation discountCodeFreeShippingUpdate($id: ID!, $freeShippingCodeDiscount: DiscountCodeFreeShippingInput!) {
+    discountCodeFreeShippingUpdate(id: $id, freeShippingCodeDiscount: $freeShippingCodeDiscount) {
+      codeDiscountNode {
+        id
+        codeDiscount {
+          ... on DiscountCodeFreeShipping {
+            title
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Discount Automatic Basic - Create
+ */
+export const DISCOUNT_AUTOMATIC_BASIC_CREATE = `
+  mutation discountAutomaticBasicCreate($automaticBasicDiscount: DiscountAutomaticBasicInput!) {
+    discountAutomaticBasicCreate(automaticBasicDiscount: $automaticBasicDiscount) {
+      automaticDiscountNode {
+        id
+        automaticDiscount {
+          ... on DiscountAutomaticBasic {
+            title
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Discount Automatic Basic - Update
+ */
+export const DISCOUNT_AUTOMATIC_BASIC_UPDATE = `
+  mutation discountAutomaticBasicUpdate($id: ID!, $automaticBasicDiscount: DiscountAutomaticBasicInput!) {
+    discountAutomaticBasicUpdate(id: $id, automaticBasicDiscount: $automaticBasicDiscount) {
+      automaticDiscountNode {
+        id
+        automaticDiscount {
+          ... on DiscountAutomaticBasic {
+            title
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Discount Automatic BXGY - Create
+ */
+export const DISCOUNT_AUTOMATIC_BXGY_CREATE = `
+  mutation discountAutomaticBxgyCreate($automaticBxgyDiscount: DiscountAutomaticBxgyInput!) {
+    discountAutomaticBxgyCreate(automaticBxgyDiscount: $automaticBxgyDiscount) {
+      automaticDiscountNode {
+        id
+        automaticDiscount {
+          ... on DiscountAutomaticBxgy {
+            title
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Discount Automatic BXGY - Update
+ */
+export const DISCOUNT_AUTOMATIC_BXGY_UPDATE = `
+  mutation discountAutomaticBxgyUpdate($id: ID!, $automaticBxgyDiscount: DiscountAutomaticBxgyInput!) {
+    discountAutomaticBxgyUpdate(id: $id, automaticBxgyDiscount: $automaticBxgyDiscount) {
+      automaticDiscountNode {
+        id
+        automaticDiscount {
+          ... on DiscountAutomaticBxgy {
+            title
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Discount Automatic Free Shipping - Create
+ */
+export const DISCOUNT_AUTOMATIC_FREE_SHIPPING_CREATE = `
+  mutation discountAutomaticFreeShippingCreate($automaticFreeShippingDiscount: DiscountAutomaticFreeShippingInput!) {
+    discountAutomaticFreeShippingCreate(automaticFreeShippingDiscount: $automaticFreeShippingDiscount) {
+      automaticDiscountNode {
+        id
+        automaticDiscount {
+          ... on DiscountAutomaticFreeShipping {
+            title
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Discount Automatic Free Shipping - Update
+ */
+export const DISCOUNT_AUTOMATIC_FREE_SHIPPING_UPDATE = `
+  mutation discountAutomaticFreeShippingUpdate($id: ID!, $automaticFreeShippingDiscount: DiscountAutomaticFreeShippingInput!) {
+    discountAutomaticFreeShippingUpdate(id: $id, automaticFreeShippingDiscount: $automaticFreeShippingDiscount) {
+      automaticDiscountNode {
+        id
+        automaticDiscount {
+          ... on DiscountAutomaticFreeShipping {
+            title
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+        code
       }
     }
   }

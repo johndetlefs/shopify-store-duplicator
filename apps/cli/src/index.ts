@@ -15,6 +15,7 @@
  * - menus:dump/apply - Handle menus
  * - redirects:dump/apply - Handle redirects
  * - policies:dump/apply - Handle shop policies
+ * - discounts:dump/apply - Handle discounts (automatic and code-based)
  */
 
 import { Command } from "commander";
@@ -51,6 +52,8 @@ import {
   applyRedirects,
   dumpPolicies,
   applyPolicies,
+  dumpDiscounts,
+  applyDiscounts,
   logger,
   type GraphQLClientConfig,
 } from "@shopify-duplicator/core";
@@ -1149,6 +1152,117 @@ program
     }
 
     logger.info("\n✓ Policies apply complete");
+  });
+
+/**
+ * DISCOUNTS COMMANDS
+ */
+
+program
+  .command("discounts:dump")
+  .description("Dump discounts (automatic and code-based) from source store")
+  .option("-o, --output <file>", "Output file", "./dumps/discounts.json")
+  .action(async (options) => {
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.srcShop || !globalOpts.srcToken) {
+      logger.error(
+        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.srcShop,
+      accessToken: globalOpts.srcToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    const outputPath = resolveWorkspacePath(options.output);
+
+    logger.info(`Dumping discounts to ${outputPath}`);
+
+    const result = await dumpDiscounts(client, outputPath);
+
+    if (!result.ok) {
+      logger.error("Discounts dump failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    logger.info("✓ Discounts dump complete");
+  });
+
+program
+  .command("discounts:apply")
+  .description("Apply discounts to destination store")
+  .option("-f, --file <file>", "Input file", "./dumps/discounts.json")
+  .action(async (options) => {
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.dstShop || !globalOpts.dstToken) {
+      logger.error(
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.dstShop,
+      accessToken: globalOpts.dstToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    const filePath = resolveWorkspacePath(options.file);
+
+    if (globalOpts.dryRun) {
+      logger.info("[DRY RUN] Would apply discounts from:", { filePath });
+      return;
+    }
+
+    logger.info(`Applying discounts from ${filePath}`);
+    logger.info("Building destination index...");
+
+    // Build destination index for product/collection/variant remapping
+    const destinationIndex = await buildDestinationIndex(client);
+
+    const result = await applyDiscounts(client, filePath, destinationIndex);
+
+    if (!result.ok) {
+      logger.error("Discounts apply failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    // Format and display stats table
+    console.log(
+      formatStatsTable("Discounts Apply Results", {
+        created: result.data.created,
+        updated: result.data.updated,
+        skipped: result.data.skipped,
+        failed: result.data.failed,
+      })
+    );
+
+    if (result.data.errors.length > 0) {
+      logger.warn("\nDiscount errors:");
+      result.data.errors.forEach((e) => {
+        logger.warn(`  - ${e.title}: ${e.error}`);
+      });
+    }
+
+    if (result.data.failed > 0) {
+      logger.error(`\n${result.data.failed} discounts failed to apply`);
+      process.exit(1);
+    }
+
+    logger.info("\n✓ Discounts apply complete");
   });
 
 /**

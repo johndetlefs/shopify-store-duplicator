@@ -920,6 +920,10 @@ program
   .command("redirects:dump")
   .description("Dump redirects from source store")
   .option("-o, --output <file>", "Output file", "./dumps/redirects.json")
+  .option(
+    "--csv",
+    "Export as CSV for manual import via Shopify Admin (faster for bulk imports)"
+  )
   .action(async (options) => {
     const globalOpts = program.opts();
 
@@ -940,10 +944,18 @@ program
       apiVersion: globalOpts.apiVersion,
     });
 
-    const outputPath = resolveWorkspacePath(options.output);
+    let outputPath = resolveWorkspacePath(options.output);
+
+    // If CSV flag is set, change extension if needed
+    if (options.csv && !outputPath.endsWith(".csv")) {
+      outputPath = outputPath.replace(/\.[^.]+$/, ".csv");
+    }
+
     logger.info(`Dumping redirects to ${outputPath}`);
 
-    const result = await dumpRedirects(client, outputPath);
+    const result = await dumpRedirects(client, outputPath, {
+      csv: options.csv,
+    });
 
     if (!result.ok) {
       logger.error("Redirects dump failed", { error: result.error.message });

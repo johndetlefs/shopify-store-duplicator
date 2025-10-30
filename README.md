@@ -48,6 +48,7 @@ npm run cli -- menus:dump -o menus.json               # Export menus
 npm run cli -- menus:apply -f menus.json              # Import menus
 npm run cli -- redirects:dump -o redirects.json       # Export redirects
 npm run cli -- redirects:apply -f redirects.json      # Import redirects
+# OR for bulk imports (faster): --csv flag + manual import via Shopify Admin
 
 # 4. Validate
 npm run cli -- defs:diff -f source-defs.json          # Check schema
@@ -145,7 +146,14 @@ npm run cli -- redirects:dump -o redirects.json
 npm run cli -- redirects:apply -f redirects.json
 ```
 
-Preserves SEO by migrating all URL redirects.
+**For large numbers of redirects (1000+):**
+
+```bash
+npm run cli -- redirects:dump --csv -o redirects.csv
+# Then manually import via: Shopify Admin → Content → URL Redirects → Import
+```
+
+Preserves SEO by migrating all URL redirects. CSV import is significantly faster for bulk operations.
 
 ### Step 7: Validate
 
@@ -232,9 +240,15 @@ npm run cli -- data:dump --pages-only -o <dir>
 npm run cli -- menus:dump -o <file>       # Export menus
 npm run cli -- menus:apply -f <file>      # Import menus
 
-npm run cli -- redirects:dump -o <file>   # Export redirects
+npm run cli -- redirects:dump -o <file>   # Export redirects (JSON)
+npm run cli -- redirects:dump --csv -o <file>  # Export redirects as CSV (for manual import)
 npm run cli -- redirects:apply -f <file>  # Import redirects
 ```
+
+**CSV Import Option:**  
+For large numbers of redirects (1000+), use `--csv` flag to export as CSV, then import via:  
+**Shopify Admin → Content → URL Redirects → Import**  
+This is much faster than API-based import for bulk operations.
 
 ### Data Cleanup (Destructive)
 

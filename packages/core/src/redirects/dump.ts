@@ -43,7 +43,8 @@ export interface RedirectsDump {
  */
 export async function dumpRedirects(
   client: GraphQLClient,
-  outputFile: string
+  outputFile: string,
+  options: { csv?: boolean } = {}
 ): Promise<Result<void>> {
   logger.info("Starting redirects dump...");
 
@@ -77,13 +78,56 @@ export async function dumpRedirects(
     logger.info(`Found ${redirects.length} redirects`);
 
     // Write to file
-    const dump: RedirectsDump = { redirects };
-    fs.writeFileSync(outputFile, JSON.stringify(dump, null, 2));
-    logger.info(`✅ Redirects dumped to ${outputFile}`);
+    if (options.csv) {
+      // Export as CSV for manual import via Shopify Admin
+      const csvContent = generateCsv(redirects);
+      fs.writeFileSync(outputFile, csvContent);
+      logger.info(`✅ Redirects exported to CSV: ${outputFile}`);
+      logger.info(
+        `   Import via: Shopify Admin → Content → URL Redirects → Import`
+      );
+    } else {
+      // Export as JSON for programmatic apply
+      const dump: RedirectsDump = { redirects };
+      fs.writeFileSync(outputFile, JSON.stringify(dump, null, 2));
+      logger.info(`✅ Redirects dumped to ${outputFile}`);
+    }
 
     return ok(undefined);
   } catch (error) {
     logger.error("Error dumping redirects", { error });
     return err(error instanceof Error ? error : new Error(String(error)));
   }
+}
+
+/**
+ * Generate CSV content in Shopify's redirect import format
+ * Format: Redirect from,Redirect to
+ */
+function generateCsv(redirects: DumpedRedirect[]): string {
+  const lines: string[] = [];
+
+  // Header row
+  lines.push("Redirect from,Redirect to");
+
+  // Data rows
+  for (const redirect of redirects) {
+    // Escape quotes and wrap in quotes if needed
+    const from = escapeCsvField(redirect.path);
+    const to = escapeCsvField(redirect.target);
+    lines.push(`${from},${to}`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Escape CSV field (wrap in quotes if contains comma, quote, or newline)
+ */
+function escapeCsvField(value: string): string {
+  // If field contains comma, quote, or newline, wrap in quotes and escape existing quotes
+  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
 }

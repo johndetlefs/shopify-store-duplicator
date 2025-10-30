@@ -151,6 +151,8 @@ Preserves SEO by migrating all URL redirects.
 
 ```bash
 npm run cli -- defs:diff -f source-definitions.json
+# By default, checks if products/collections use Shopify-reserved metafields
+# Use --no-usage-check to skip this validation for faster runs on large stores
 npm run cli -- data:diff -i ./dumps
 ```
 
@@ -206,7 +208,8 @@ LOG_FORMAT=pretty       # pretty | json
 ```bash
 npm run cli -- defs:dump -o <file>        # Export schema
 npm run cli -- defs:apply -f <file>       # Import schema
-npm run cli -- defs:diff -f <file>        # Compare schema
+npm run cli -- defs:diff -f <file>        # Compare schema (includes usage validation)
+npm run cli -- defs:diff -f <file> --no-usage-check  # Compare schema (faster, skip usage check)
 ```
 
 ### Data

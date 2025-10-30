@@ -2,18 +2,31 @@
 
 ## Complete Migration (One-Liner)
 
-```bash
+````bash
 # Full migration workflow
 npm run cli -- defs:dump -o defs.json && \
 npm run cli -- defs:apply -f defs.json && \
 npm run cli -- data:dump -o ./dumps && \
-npm run cli -- data:apply -i ./dumps && \
+npm run cli -- dat# 4. Dry run to preview
+npm run cli -- defs:apply -f test-defs.json --dry-run --verbose
+npm run cli -- data:apply -i ./test-dumps --dry-run --verbose
+
+# 5. Apply for real
+npm run cli -- defs:apply -f test-defs.json
+npm run cli -- data:apply -i ./test-dumps
+
+# 6. Validate
+npm run cli -- defs:diff -f test-defs.json
+# Optional: Skip usage check for faster validation
+# npm run cli -- defs:diff -f test-defs.json --no-usage-check
+npm run cli -- data:diff -i ./test-dumps
+```/dumps && \
 npm run cli -- menus:dump -o menus.json && \
 npm run cli -- menus:apply -f menus.json && \
 npm run cli -- redirects:dump -o redirects.json && \
 npm run cli -- redirects:apply -f redirects.json && \
 echo "✅ Migration complete!"
-```
+````
 
 ## Essential Commands
 
@@ -31,7 +44,8 @@ cp .env.example .env    # Create config file
 ```bash
 npm run cli -- defs:dump -o defs.json           # Export
 npm run cli -- defs:apply -f defs.json          # Import
-npm run cli -- defs:diff -f defs.json           # Validate
+npm run cli -- defs:diff -f defs.json           # Validate (with usage check)
+npm run cli -- defs:diff -f defs.json --no-usage-check  # Validate (faster, skip usage check)
 ```
 
 ### Data (All Resources)
@@ -88,6 +102,7 @@ All commands support:
 --api-version <version>  # Override Shopify API version (default: 2025-10)
 --dry-run               # Preview changes without executing
 --verbose               # Enable debug logging (-v)
+--no-usage-check        # Skip usage validation (defs:diff only, faster)
 ```
 
 Example:
@@ -289,6 +304,8 @@ npm run cli -- redirects:apply -f prod-redirects.json
 
 # 4. Validate everything
 npm run cli -- defs:diff -f prod-defs.json
+# Note: defs:diff checks if products/collections are using Shopify-reserved metafields
+# Use --no-usage-check flag to skip this check for faster validation on large stores
 npm run cli -- data:diff -i ./prod-dumps
 
 # 5. Verify in Shopify admin

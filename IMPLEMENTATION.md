@@ -200,7 +200,7 @@
   - Global options (shop domains, tokens, API version, dry-run)
   - `defs:dump` - Dump definitions to JSON
   - `defs:apply` - Apply definitions from JSON
-  - `defs:diff` - Compare source definitions with destination
+  - `defs:diff` - Compare source definitions with destination (includes optional usage validation with `--no-usage-check` flag)
   - `data:dump` - Dump all data to JSONL files (includes files) ✨ **UPDATED**
   - `data:apply` - Apply all data with file relinking & reference remapping ✨ **UPDATED**
   - `data:diff` - Compare source data with destination

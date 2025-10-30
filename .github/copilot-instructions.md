@@ -78,7 +78,7 @@ Use **Shopify Admin GraphQL** with **Bulk Operations** for large reads/writes wh
 
 - `defs:dump` → Export metaobject/metafield **definitions** (schema) to JSON
 - `defs:apply` → Upsert definitions to destination (idempotent)
-- `defs:diff` → Compare definitions, report missing/changed
+- `defs:diff` → Compare definitions, report missing/changed (includes optional usage validation with `--no-usage-check` to skip)
 
 ### Data
 
@@ -228,3 +228,5 @@ When working on this codebase:
 - Add comprehensive error handling with detailed stats
 - Test with real Shopify development stores
 - Update documentation in README.md, QUICK_REFERENCE.md, and IMPLEMENTATION.md
+- **DO NOT create summary files or high-level overviews unless specifically requested**
+- Focus on code changes and minimal documentation updates to existing files only

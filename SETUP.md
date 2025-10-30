@@ -130,6 +130,8 @@ npm run cli -- data:apply -i ./dumps
 
 # 8. Validate the migration
 npm run cli -- defs:diff -f source-defs.json
+# Optional: Skip usage check for faster validation
+# npm run cli -- defs:diff -f source-defs.json --no-usage-check
 npm run cli -- data:diff -i ./dumps
 
 # 9. Export and apply menus
@@ -198,7 +200,7 @@ npm run cli -- data:apply -i ./dumps
 
 - `defs:dump` - Export metaobject and metafield definitions
 - `defs:apply` - Import definitions to destination
-- `defs:diff` - Compare definitions
+- `defs:diff` - Compare definitions (includes usage validation; use `--no-usage-check` for faster runs)
 
 ### Data Operations
 
@@ -304,6 +306,8 @@ Once setup is complete, you can start migrating stores:
    npm run cli -- defs:dump -o defs.json
    npm run cli -- defs:apply -f defs.json
    npm run cli -- defs:diff -f defs.json
+   # Optional: Skip usage check for faster validation
+   # npm run cli -- defs:diff -f defs.json --no-usage-check
    ```
 
 2. ✅ **Data Migration** (includes files, automatic relinking)

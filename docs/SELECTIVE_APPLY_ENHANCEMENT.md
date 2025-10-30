@@ -6,6 +6,7 @@
 ## Problem
 
 The `data:apply` command had flags for selective application (`--pages-only`, `--blogs-only`, `--articles-only`), but they still went through the full `applyAllData` workflow which:
+
 1. Built destination index (necessary)
 2. Applied files (unnecessary for CMS-only)
 3. Applied metaobjects (unnecessary for CMS-only)
@@ -20,6 +21,7 @@ Enhanced the `data:apply` command to detect CMS-specific flags and call individu
 ### New Behavior
 
 When using `--pages-only`, `--blogs-only`, or `--articles-only`:
+
 - ✅ Build destination index (required for ID lookups)
 - ✅ Apply ONLY the selected resource type
 - ❌ Skip files, metaobjects, and other resources
@@ -30,6 +32,7 @@ When using `--pages-only`, `--blogs-only`, or `--articles-only`:
 ### File: `apps/cli/src/index.ts`
 
 #### 1. Added imports for individual apply functions
+
 ```typescript
 import {
   // ... existing imports
@@ -41,6 +44,7 @@ import {
 ```
 
 #### 2. Added selective apply logic
+
 ```typescript
 // Handle selective application for CMS content types
 if (options.pagesOnly || options.blogsOnly || options.articlesOnly) {
@@ -51,12 +55,12 @@ if (options.pagesOnly || options.blogsOnly || options.articlesOnly) {
     result = await applyPages(client, pagesFile, index);
     // Show focused output, then return
   }
-  
+
   if (options.blogsOnly) {
     result = await applyBlogs(client, blogsFile, index);
     // Show focused output, then return
   }
-  
+
   if (options.articlesOnly) {
     result = await applyArticles(client, articlesFile, index);
     // Show focused output, then return
@@ -75,6 +79,7 @@ npm run cli -- data:apply -i ./dumps --pages-only
 ```
 
 **Output:**
+
 ```
 Building destination index...
 === Applying Pages ===
@@ -95,6 +100,7 @@ npm run cli -- data:apply -i ./dumps --blogs-only
 ```
 
 **Output:**
+
 ```
 Building destination index...
 === Applying Blogs ===
@@ -115,6 +121,7 @@ npm run cli -- data:apply -i ./dumps --articles-only
 ```
 
 **Output:**
+
 ```
 Building destination index...
 === Applying Articles ===
@@ -178,15 +185,18 @@ npm run cli -- data:apply -i ./dumps --articles-only
 ## Benefits
 
 ### Performance
+
 - **Before:** ~30-60 seconds (full pipeline with files + metaobjects)
 - **After:** ~5-10 seconds (direct apply)
 - **Speedup:** 3-6x faster for selective CMS application
 
 ### Clarity
+
 - **Before:** Logs showed files, metaobjects, etc. (confusing)
 - **After:** Only shows the selected resource (clear)
 
 ### Workflow
+
 - **Before:** Hard to test individual CMS resources
 - **After:** Easy to test pages, blogs, articles independently
 
@@ -228,11 +238,13 @@ Options:
 ### Correct Usage
 
 ✅ **CORRECT:** Use `-i` (input) for apply:
+
 ```bash
 npm run cli -- data:apply -i ./dumps --pages-only
 ```
 
 ❌ **INCORRECT:** Don't use `-o` (output) for apply:
+
 ```bash
 npm run cli -- data:apply -o ./dumps --pages-only  # WRONG!
 ```
@@ -307,6 +319,7 @@ echo "  - Articles: Online Store → Blog posts"
 
 **Cause:** Articles dump references a blog that doesn't exist in destination  
 **Solution:** Apply blogs before articles:
+
 ```bash
 npm run cli -- data:apply -i ./dumps --blogs-only
 npm run cli -- data:apply -i ./dumps --articles-only  # After blogs
@@ -315,11 +328,13 @@ npm run cli -- data:apply -i ./dumps --articles-only  # After blogs
 ### Template Shows "Default" in Destination
 
 **Possible causes:**
+
 1. Source resource actually uses default template (check dump: `templateSuffix: null`)
 2. Destination theme doesn't have the custom template file
 3. Old dump created before template suffix fix (re-dump required)
 
 **Solution:**
+
 - Verify source has custom template
 - Ensure destination theme has matching template file
 - Re-dump if dump is old: `npm run cli -- data:dump -o ./dumps --pages-only`

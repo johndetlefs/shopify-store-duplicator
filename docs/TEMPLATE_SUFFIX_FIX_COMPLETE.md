@@ -12,16 +12,19 @@ Initial implementation added `templateSuffix` to GraphQL queries but the dump pr
 ### Files Modified (10 total)
 
 #### 1. GraphQL Queries (`packages/core/src/graphql/queries.ts`)
+
 - ✅ Added `templateSuffix` to `PAGES_BULK` query
-- ✅ Added `templateSuffix` to `BLOGS_BULK` query  
+- ✅ Added `templateSuffix` to `BLOGS_BULK` query
 - ✅ Added `templateSuffix` to `ARTICLES_BULK` query
 
 #### 2. Type Definitions - Apply (`packages/core/src/migration/apply.ts`)
+
 - ✅ Added `templateSuffix?: string` to `DumpedPage` interface
 - ✅ Added `templateSuffix?: string` to `DumpedBlog` interface
 - ✅ Added `templateSuffix?: string` to `DumpedArticle` interface
 
 #### 3. Type Definitions - Dump (`packages/core/src/migration/dump.ts`)
+
 - ✅ Added `templateSuffix?: string` to `PageNode` interface
 - ✅ Added `templateSuffix?: string` to `BlogNode` interface
 - ✅ Added `templateSuffix?: string` to `ArticleNode` interface
@@ -30,11 +33,13 @@ Initial implementation added `templateSuffix` to GraphQL queries but the dump pr
 - ✅ Added `templateSuffix?: string` to `DumpedArticle` interface (dump version)
 
 #### 4. Dump Processing (`packages/core/src/migration/dump.ts`)
+
 - ✅ Added `templateSuffix: obj.templateSuffix` to `dumpPages()` function
 - ✅ Added `templateSuffix: obj.templateSuffix` to `dumpBlogs()` function
 - ✅ Added `templateSuffix: obj.templateSuffix` to `dumpArticles()` function
 
 #### 5. Apply Logic (`packages/core/src/migration/apply.ts`)
+
 - ✅ Added `templateSuffix: page.templateSuffix || null` to `PAGE_CREATE`
 - ✅ Added `templateSuffix: page.templateSuffix || null` to `PAGE_UPDATE`
 - ✅ Added `templateSuffix: blog.templateSuffix || null` to `BLOG_CREATE`
@@ -45,7 +50,9 @@ Initial implementation added `templateSuffix` to GraphQL queries but the dump pr
 ## Bug Found & Fixed
 
 ### Initial Bug
+
 When checking dumps, `templateSuffix` was missing from output:
+
 ```bash
 $ cat ./dumps/pages.jsonl | head -1 | jq 'keys'
 [
@@ -60,12 +67,15 @@ $ cat ./dumps/pages.jsonl | head -1 | jq 'keys'
 ```
 
 ### Root Cause
+
 The GraphQL queries were fetching `templateSuffix`, but the dump processing functions weren't extracting it from the response and adding it to the output objects.
 
 ### Fix Applied
+
 Updated all three dump functions to extract and include `templateSuffix`:
 
 **Before:**
+
 ```typescript
 const page: DumpedPage = {
   id: obj.id,
@@ -79,6 +89,7 @@ const page: DumpedPage = {
 ```
 
 **After:**
+
 ```typescript
 const page: DumpedPage = {
   id: obj.id,
@@ -86,7 +97,7 @@ const page: DumpedPage = {
   title: obj.title,
   body: obj.body,
   bodySummary: obj.bodySummary,
-  templateSuffix: obj.templateSuffix,  // ✅ Added
+  templateSuffix: obj.templateSuffix, // ✅ Added
   metafields: [],
 };
 ```
@@ -149,11 +160,13 @@ npm run cli -- data:apply -i ./dumps --pages-only
 ## Expected Behavior
 
 ### Pages/Blogs/Articles with Default Template
+
 - **Dump:** `"templateSuffix": null`
 - **Display:** "default"
 - **Admin:** Template dropdown shows "Default"
 
 ### Pages/Blogs/Articles with Custom Template
+
 - **Dump:** `"templateSuffix": "contact"` (or other template name)
 - **Display:** "contact"
 - **Admin:** Template dropdown shows "contact"
@@ -161,18 +174,20 @@ npm run cli -- data:apply -i ./dumps --pages-only
 ## Validation
 
 ### GraphQL Response
+
 ```graphql
 {
   page(id: "gid://shopify/Page/123") {
     id
     handle
     title
-    templateSuffix  # Will be null or "custom-template-name"
+    templateSuffix # Will be null or "custom-template-name"
   }
 }
 ```
 
 ### Dump File
+
 ```json
 {
   "id": "gid://shopify/Page/123",
@@ -186,11 +201,13 @@ npm run cli -- data:apply -i ./dumps --pages-only
 ```
 
 ### Destination Store
+
 After apply, query the destination:
+
 ```graphql
 {
   page(id: "gid://shopify/Page/456") {
-    templateSuffix  # Should match source
+    templateSuffix # Should match source
   }
 }
 ```

@@ -6,6 +6,7 @@
 ## Problem
 
 The CLI had inconsistent default paths across different commands:
+
 - `data:dump` and `data:apply` used `data/dumps`
 - `defs:dump` and `defs:apply` used `data/source-defs.json`
 - `menus:dump` and `menus:apply` used `data/menus.json`
@@ -20,19 +21,19 @@ Standardized ALL commands to use `./dumps` as the default directory with consist
 
 ### New Defaults
 
-| Command | Old Default | New Default |
-|---------|-------------|-------------|
-| `defs:dump` | `data/source-defs.json` | `./dumps/definitions.json` |
-| `defs:apply` | `data/source-defs.json` | `./dumps/definitions.json` |
-| `defs:diff` | `./dumps/definitions.json` | `./dumps/definitions.json` ✅ (no change) |
-| `data:dump` | `data/dumps` | `./dumps` |
-| `data:apply` | `data/dumps` | `./dumps` |
-| `data:diff` | `./dumps` | `./dumps` ✅ (no change) |
-| `menus:dump` | `data/menus.json` | `./dumps/menus.json` |
-| `menus:apply` | `data/menus.json` | `./dumps/menus.json` |
-| `redirects:dump` | `data/redirects.json` | `./dumps/redirects.json` |
-| `redirects:apply` | `data/redirects.json` | `./dumps/redirects.json` |
-| `files:apply` | `./dumps/files.jsonl` | `./dumps/files.jsonl` ✅ (no change) |
+| Command           | Old Default                | New Default                               |
+| ----------------- | -------------------------- | ----------------------------------------- |
+| `defs:dump`       | `data/source-defs.json`    | `./dumps/definitions.json`                |
+| `defs:apply`      | `data/source-defs.json`    | `./dumps/definitions.json`                |
+| `defs:diff`       | `./dumps/definitions.json` | `./dumps/definitions.json` ✅ (no change) |
+| `data:dump`       | `data/dumps`               | `./dumps`                                 |
+| `data:apply`      | `data/dumps`               | `./dumps`                                 |
+| `data:diff`       | `./dumps`                  | `./dumps` ✅ (no change)                  |
+| `menus:dump`      | `data/menus.json`          | `./dumps/menus.json`                      |
+| `menus:apply`     | `data/menus.json`          | `./dumps/menus.json`                      |
+| `redirects:dump`  | `data/redirects.json`      | `./dumps/redirects.json`                  |
+| `redirects:apply` | `data/redirects.json`      | `./dumps/redirects.json`                  |
+| `files:apply`     | `./dumps/files.jsonl`      | `./dumps/files.jsonl` ✅ (no change)      |
 
 ### Additional Cleanup
 
@@ -216,10 +217,12 @@ npm run cli -- redirects:dump --help
 ## Removed Duplicates
 
 ### defs:diff
+
 - ❌ Removed: Non-functional command at line ~294 (just showed warning)
 - ✅ Kept: Functional command at line ~1035 (performs actual comparison)
 
 ### data:diff
+
 - ❌ Removed: Non-functional command at line ~625 (just showed warning)
 - ✅ Kept: Functional command at line ~1133 (performs actual comparison)
 

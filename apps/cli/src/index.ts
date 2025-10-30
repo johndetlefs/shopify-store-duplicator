@@ -405,7 +405,7 @@ program
       if (options.pagesOnly) {
         const pagesFile = `${inputDir}/pages.jsonl`;
         result = await applyPages(client, pagesFile, index);
-        
+
         if (!result.ok) {
           logger.error("Pages apply failed", { error: result.error.message });
           process.exit(1);
@@ -413,18 +413,18 @@ program
 
         logger.info("\n=== Pages Apply Complete ===");
         console.log(formatStatsTable("Pages", result.data));
-        
+
         if (result.data.errors.length > 0) {
           logger.warn("Page errors:", result.data.errors.slice(0, 10));
         }
-        
+
         return;
       }
 
       if (options.blogsOnly) {
         const blogsFile = `${inputDir}/blogs.jsonl`;
         result = await applyBlogs(client, blogsFile, index);
-        
+
         if (!result.ok) {
           logger.error("Blogs apply failed", { error: result.error.message });
           process.exit(1);
@@ -432,30 +432,32 @@ program
 
         logger.info("\n=== Blogs Apply Complete ===");
         console.log(formatStatsTable("Blogs", result.data));
-        
+
         if (result.data.errors.length > 0) {
           logger.warn("Blog errors:", result.data.errors.slice(0, 10));
         }
-        
+
         return;
       }
 
       if (options.articlesOnly) {
         const articlesFile = `${inputDir}/articles.jsonl`;
         result = await applyArticles(client, articlesFile, index);
-        
+
         if (!result.ok) {
-          logger.error("Articles apply failed", { error: result.error.message });
+          logger.error("Articles apply failed", {
+            error: result.error.message,
+          });
           process.exit(1);
         }
 
         logger.info("\n=== Articles Apply Complete ===");
         console.log(formatStatsTable("Articles", result.data));
-        
+
         if (result.data.errors.length > 0) {
           logger.warn("Article errors:", result.data.errors.slice(0, 10));
         }
-        
+
         return;
       }
     }
@@ -625,8 +627,7 @@ program
  * FILES COMMANDS
  */
 
-program
-  .command("files:apply")
+program.command("files:apply");
 
 /**
  * FILES COMMANDS

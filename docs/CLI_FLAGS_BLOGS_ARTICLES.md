@@ -10,6 +10,7 @@ The `data:dump` command had selective flags for pages, products, collections, an
 ## Solution
 
 Added two new flags to the `data:dump` command:
+
 - `--blogs-only` - Dump only blogs
 - `--articles-only` - Dump only articles
 
@@ -18,12 +19,14 @@ Added two new flags to the `data:dump` command:
 ### File: `apps/cli/src/index.ts`
 
 #### 1. Added flag options
+
 ```typescript
 .option("--blogs-only", "Dump only blogs", false)
 .option("--articles-only", "Dump only articles", false)
 ```
 
 #### 2. Added conditional logic
+
 ```typescript
 } else if (options.blogsOnly) {
   result = await dumpBlogs(client, outputDir);
@@ -32,6 +35,7 @@ Added two new flags to the `data:dump` command:
 ```
 
 #### 3. Added imports
+
 ```typescript
 import {
   // ... existing imports

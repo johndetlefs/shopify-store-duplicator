@@ -72,14 +72,17 @@ interface DumpedArticle {
 Updated create and update operations to include `templateSuffix`:
 
 **applyPages:**
+
 - `PAGE_CREATE`: Added `templateSuffix: page.templateSuffix || null`
 - `PAGE_UPDATE`: Added `templateSuffix: page.templateSuffix || null`
 
 **applyBlogs:**
+
 - `BLOG_CREATE`: Added `templateSuffix: blog.templateSuffix || null`
 - `BLOG_UPDATE`: Added `templateSuffix: blog.templateSuffix || null`
 
 **applyArticles:**
+
 - `ARTICLE_CREATE`: Added `templateSuffix: article.templateSuffix || null`
 - `ARTICLE_UPDATE`: Added `templateSuffix: article.templateSuffix || null`
 
@@ -116,6 +119,7 @@ The apply operation is **idempotent**, so re-running it will simply update the e
 ### Why `|| null`?
 
 The Shopify GraphQL API expects `null` (not `undefined`) to reset a field to its default value. Using `|| null` ensures:
+
 - If `templateSuffix` is set in source → it's copied to destination
 - If `templateSuffix` is `undefined` → destination gets `null` (default template)
 
@@ -133,11 +137,13 @@ In Shopify, `templateSuffix` is the part after the period in a template filename
 After applying, verify templates are correct:
 
 1. **Check a page in destination admin:**
+
    - Go to Online Store → Pages
    - Open a page that had a custom template
    - Verify the template dropdown shows the correct template
 
 2. **Check a blog in destination admin:**
+
    - Go to Online Store → Blog posts → Manage blogs
    - Open a blog
    - Verify the template dropdown shows the correct template

@@ -13,6 +13,7 @@ When dumping and applying articles, the `image` field was not being captured or 
 ## Root Cause
 
 The implementation was missing the `image` field in several places:
+
 1. GraphQL query (`ARTICLES_BULK`) didn't fetch the image
 2. TypeScript interfaces didn't include the image field
 3. Dump processing didn't extract the image
@@ -107,7 +108,7 @@ const article: DumpedArticle = {
   title: obj.title,
   body: obj.body,
   templateSuffix: obj.templateSuffix,
-  image: obj.image,  // ← Added this line
+  image: obj.image, // ← Added this line
   blogHandle: obj.blog?.handle || "",
   metafields: [],
 };
@@ -155,7 +156,7 @@ if (article.author) {
 
 // Add image if present
 if (article.image) {
-  articleInput.image = article.image;  // ← Added this
+  articleInput.image = article.image; // ← Added this
 }
 ```
 
@@ -175,7 +176,7 @@ const articleInput: any = {
 
 // Add image if present
 if (article.image) {
-  articleInput.image = article.image;  // ← Added this
+  articleInput.image = article.image; // ← Added this
 }
 ```
 
@@ -195,10 +196,12 @@ According to Shopify's GraphQL API documentation:
 ### Setting Image on Create/Update
 
 The `ArticleCreateInput` and `ArticleUpdateInput` accept an `image` object with:
+
 - `altText` (optional): String for alt text
 - `url` (required): URL of the image (can be external URL or Shopify CDN URL)
 
 Example:
+
 ```json
 {
   "image": {
@@ -221,6 +224,7 @@ cat ./dumps/articles.jsonl | jq '.image' | head -20
 ```
 
 **Expected output:**
+
 ```json
 {
   "altText": "Some alt text",
@@ -271,6 +275,7 @@ This implementation **references** the image URL from the source. The image itse
 - ⚠️ **Consideration:** Image URLs must remain accessible
 
 If you need to re-upload images (copy files to destination store), that would require:
+
 1. Downloading the image from source URL
 2. Uploading to destination using `stagedUploadsCreate` + `fileCreate`
 3. Updating the article with the new destination CDN URL
@@ -280,12 +285,14 @@ This more complex approach is not implemented in this fix but could be added if 
 ### 4. Idempotency
 
 The image field is set on both CREATE and UPDATE operations:
+
 - First run: Creates article with image
 - Re-run: Updates existing article, preserving or updating image
 
 ## Backward Compatibility
 
 ✅ This change is backward compatible:
+
 - Old dumps without `image` field will still work (image is optional)
 - New dumps will include `image` field when present
 - Apply operations handle both cases gracefully
@@ -299,6 +306,7 @@ The image field is set on both CREATE and UPDATE operations:
 ## Status
 
 ✅ **Complete and tested**
+
 - Build successful
 - All TypeScript interfaces updated
 - Dump captures image data

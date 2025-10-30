@@ -145,6 +145,7 @@ head -1 ./dumps/articles.jsonl | jq '.'
 ### 2. Verify in Destination Admin (After Applying)
 
 #### Pages
+
 1. Go to **Online Store → Pages**
 2. Click on a page that had a custom template in source
 3. Check the **Template** dropdown
@@ -152,6 +153,7 @@ head -1 ./dumps/articles.jsonl | jq '.'
 5. ❌ Should NOT show "Default"
 
 #### Blogs
+
 1. Go to **Online Store → Blog posts → Manage blogs**
 2. Click on a blog
 3. Check the **Template** dropdown
@@ -159,6 +161,7 @@ head -1 ./dumps/articles.jsonl | jq '.'
 5. ❌ Should NOT show "Default"
 
 #### Articles
+
 1. Go to **Online Store → Blog posts**
 2. Click on an article
 3. Check the **Template** dropdown
@@ -204,26 +207,31 @@ Query the destination store to verify `templateSuffix`:
 ## Test Cases
 
 ### Test Case 1: Page with Custom Template
+
 - **Source:** Page using `page.contact.liquid`
 - **Expected in dump:** `"templateSuffix": "contact"`
 - **Expected in destination:** Template dropdown shows "contact"
 
 ### Test Case 2: Page with Default Template
+
 - **Source:** Page using default `page.liquid`
 - **Expected in dump:** `"templateSuffix": null` or field absent
 - **Expected in destination:** Template dropdown shows "Default"
 
 ### Test Case 3: Blog with Custom Template
+
 - **Source:** Blog using `blog.news.liquid`
 - **Expected in dump:** `"templateSuffix": "news"`
 - **Expected in destination:** Template dropdown shows "news"
 
 ### Test Case 4: Article with Custom Template
+
 - **Source:** Article using `article.featured.liquid`
 - **Expected in dump:** `"templateSuffix": "featured"`
 - **Expected in destination:** Template dropdown shows "featured"
 
 ### Test Case 5: Re-apply (Idempotency Test)
+
 - **Action:** Run apply command twice
 - **Expected:** Second run updates templates again (no errors)
 - **Verify:** Template still correct after second apply
@@ -246,11 +254,13 @@ npm run cli -- data:dump -o ./dumps --pages-only
 ### Issue: Template showing as "Default" in destination
 
 **Possible causes:**
+
 1. Source page/blog/article actually uses default template (`templateSuffix` is null)
 2. Destination theme doesn't have the custom template file
 3. Template name mismatch (e.g., `page.contact.liquid` in source but `page.contact-us.liquid` in destination)
 
-**Solution:** 
+**Solution:**
+
 - Verify source has custom template
 - Ensure destination theme has matching template file
 - Check template names match exactly
@@ -263,22 +273,26 @@ npm run cli -- data:dump -o ./dumps --pages-only
 ## Performance
 
 ### Individual Resource Flags
+
 - **Pages only:** ~5-30 seconds (depending on page count)
 - **Blogs only:** ~5-15 seconds (usually fewer blogs)
 - **Articles only:** ~10-60 seconds (can have many articles)
 
 ### Full Migration
+
 - **Complete dump+apply:** 5-30 minutes (depending on store size)
 
 ## Best Practice
 
 **For testing this specific fix:**
+
 1. ✅ Use `--pages-only`, `--blogs-only`, `--articles-only` flags
 2. ✅ Test with a small subset of pages/blogs/articles
 3. ✅ Verify in admin UI before running full migration
 4. ✅ Test idempotency by running apply twice
 
 **For production migration:**
+
 1. Run full dump/apply without flags
 2. Verify all templates preserved
 3. Keep dumps for rollback capability

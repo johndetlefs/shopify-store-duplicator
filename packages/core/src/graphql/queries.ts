@@ -1049,6 +1049,23 @@ export const REDIRECT_CREATE = `
   }
 `;
 
+export const REDIRECT_UPDATE = `
+  mutation urlRedirectUpdate($id: ID!, $urlRedirect: UrlRedirectInput!) {
+    urlRedirectUpdate(id: $id, urlRedirect: $urlRedirect) {
+      urlRedirect {
+        id
+        path
+        target
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
 /**
  * Product/Collection/Page lookups for mapping
  */

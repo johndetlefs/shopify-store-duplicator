@@ -269,12 +269,22 @@ export async function runBulkQueryAndDownload(
   }
 
   const operation = pollResult.data;
+
+  // If no URL, the operation completed with 0 results - return empty iterator
   if (!operation.url) {
-    return err(new ShopifyApiError("No download URL in completed operation"));
+    logger.info("Bulk operation completed with no results (empty dataset)");
+    return ok(emptyAsyncIterable());
   }
 
   // Return the async iterable for streaming the data
   return ok(downloadBulkJsonl(operation.url));
+}
+
+/**
+ * Returns an empty async iterable (for operations with 0 results)
+ */
+async function* emptyAsyncIterable(): AsyncIterable<any> {
+  // Yields nothing
 }
 
 /**

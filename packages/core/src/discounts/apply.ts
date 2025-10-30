@@ -438,6 +438,12 @@ async function updateDiscount(
             destinationIndex
           ),
         };
+        // eslint-disable-next-line no-console
+        console.log("\n=== UPDATING DISCOUNT CODE FREE SHIPPING ===");
+        // eslint-disable-next-line no-console
+        console.log("Variables:", JSON.stringify(variables, null, 2));
+        // eslint-disable-next-line no-console
+        console.log("==========================================\n");
         break;
 
       case "DiscountAutomaticBasic":
@@ -521,8 +527,13 @@ function buildCodeBasicInput(
     customerGets: {
       value: buildDiscountValueInput(discount.customerGets.value),
       items: buildDiscountItemsInput(discount.customerGets.items, index),
-      appliesOnOneTimePurchase: discount.customerGets.appliesOnOneTimePurchase,
-      appliesOnSubscription: discount.customerGets.appliesOnSubscription,
+      ...(discount.customerGets.appliesOnSubscription === true
+        ? {
+            appliesOnOneTimePurchase:
+              discount.customerGets.appliesOnOneTimePurchase,
+            appliesOnSubscription: discount.customerGets.appliesOnSubscription,
+          }
+        : {}),
     },
     customerSelection: buildCustomerSelectionInput(discount.customerSelection),
     minimumRequirement: buildMinimumRequirementInput(
@@ -530,6 +541,10 @@ function buildCodeBasicInput(
     ),
     usageLimit: discount.usageLimit,
     appliesOncePerCustomer: discount.appliesOncePerCustomer,
+    ...(discount.customerGets.appliesOnSubscription === true &&
+    discount.recurringCycleLimit
+      ? { recurringCycleLimit: discount.recurringCycleLimit }
+      : {}),
     combinesWith: discount.combinesWith,
   };
 }
@@ -555,12 +570,21 @@ function buildCodeBxgyInput(
     customerGets: {
       value: buildDiscountValueInput(discount.customerGets.value),
       items: buildDiscountItemsInput(discount.customerGets.items, index),
-      appliesOnOneTimePurchase: discount.customerGets.appliesOnOneTimePurchase,
-      appliesOnSubscription: discount.customerGets.appliesOnSubscription,
+      ...(discount.customerGets.appliesOnSubscription === true
+        ? {
+            appliesOnOneTimePurchase:
+              discount.customerGets.appliesOnOneTimePurchase,
+            appliesOnSubscription: discount.customerGets.appliesOnSubscription,
+          }
+        : {}),
     },
     customerSelection: buildCustomerSelectionInput(discount.customerSelection),
     usageLimit: discount.usageLimit,
     appliesOncePerCustomer: discount.appliesOncePerCustomer,
+    ...(discount.customerGets.appliesOnSubscription === true &&
+    discount.recurringCycleLimit
+      ? { recurringCycleLimit: discount.recurringCycleLimit }
+      : {}),
     usesPerOrderLimit: discount.usesPerOrderLimit,
     combinesWith: discount.combinesWith,
   };
@@ -575,21 +599,38 @@ function buildCodeFreeShippingInput(
 ): any {
   if (discount.type !== "DiscountCodeFreeShipping") return {};
 
+  const builtMin = buildMinimumRequirementInput(discount.minimumRequirement);
+  // If dump didn't include a structured minimumRequirement, try parsing from the human summary
+  let minimumRequirementInput = builtMin;
+  if (!minimumRequirementInput && (discount as any).summary) {
+    const parsed = parseMinimumFromSummary((discount as any).summary);
+    if (parsed && parsed.type === "subtotal") {
+      const amt = Number(parsed.amount);
+      minimumRequirementInput = {
+        subtotal: { greaterThanOrEqualToSubtotal: amt },
+      };
+    }
+  }
+
   return {
     title: discount.title,
     code: discount.codes?.[0],
     startsAt: discount.startsAt,
     endsAt: discount.endsAt,
     customerSelection: buildCustomerSelectionInput(discount.customerSelection),
-    minimumRequirement: buildMinimumRequirementInput(
-      discount.minimumRequirement
-    ),
+    minimumRequirement: minimumRequirementInput,
     destination: buildShippingDestinationInput(discount.destination),
     maximumShippingPrice: discount.maximumShippingPrice
       ? { amount: discount.maximumShippingPrice }
       : undefined,
-    appliesOnOneTimePurchase: discount.appliesOnOneTimePurchase,
-    appliesOnSubscription: discount.appliesOnSubscription,
+    // Only include subscription fields if subscriptions are explicitly being used
+    ...(discount.appliesOnSubscription === true
+      ? {
+          appliesOnOneTimePurchase: discount.appliesOnOneTimePurchase,
+          appliesOnSubscription: discount.appliesOnSubscription,
+          recurringCycleLimit: discount.recurringCycleLimit,
+        }
+      : {}),
     usageLimit: discount.usageLimit,
     appliesOncePerCustomer: discount.appliesOncePerCustomer,
     combinesWith: discount.combinesWith,
@@ -612,12 +653,21 @@ function buildAutomaticBasicInput(
     customerGets: {
       value: buildDiscountValueInput(discount.customerGets.value),
       items: buildDiscountItemsInput(discount.customerGets.items, index),
-      appliesOnOneTimePurchase: discount.customerGets.appliesOnOneTimePurchase,
-      appliesOnSubscription: discount.customerGets.appliesOnSubscription,
+      ...(discount.customerGets.appliesOnSubscription === true
+        ? {
+            appliesOnOneTimePurchase:
+              discount.customerGets.appliesOnOneTimePurchase,
+            appliesOnSubscription: discount.customerGets.appliesOnSubscription,
+          }
+        : {}),
     },
     minimumRequirement: buildMinimumRequirementInput(
       discount.minimumRequirement
     ),
+    ...(discount.customerGets.appliesOnSubscription === true &&
+    discount.recurringCycleLimit
+      ? { recurringCycleLimit: discount.recurringCycleLimit }
+      : {}),
     combinesWith: discount.combinesWith,
   };
 }
@@ -642,9 +692,18 @@ function buildAutomaticBxgyInput(
     customerGets: {
       value: buildDiscountValueInput(discount.customerGets.value),
       items: buildDiscountItemsInput(discount.customerGets.items, index),
-      appliesOnOneTimePurchase: discount.customerGets.appliesOnOneTimePurchase,
-      appliesOnSubscription: discount.customerGets.appliesOnSubscription,
+      ...(discount.customerGets.appliesOnSubscription === true
+        ? {
+            appliesOnOneTimePurchase:
+              discount.customerGets.appliesOnOneTimePurchase,
+            appliesOnSubscription: discount.customerGets.appliesOnSubscription,
+          }
+        : {}),
     },
+    ...(discount.customerGets.appliesOnSubscription === true &&
+    discount.recurringCycleLimit
+      ? { recurringCycleLimit: discount.recurringCycleLimit }
+      : {}),
     usesPerOrderLimit: discount.usesPerOrderLimit,
     combinesWith: discount.combinesWith,
   };
@@ -670,8 +729,13 @@ function buildAutomaticFreeShippingInput(
     maximumShippingPrice: discount.maximumShippingPrice
       ? { amount: discount.maximumShippingPrice }
       : undefined,
-    appliesOnOneTimePurchase: discount.appliesOnOneTimePurchase,
-    appliesOnSubscription: discount.appliesOnSubscription,
+    ...(discount.appliesOnSubscription === true
+      ? {
+          appliesOnOneTimePurchase: discount.appliesOnOneTimePurchase,
+          appliesOnSubscription: discount.appliesOnSubscription,
+          recurringCycleLimit: discount.recurringCycleLimit,
+        }
+      : {}),
     combinesWith: discount.combinesWith,
   };
 }
@@ -775,13 +839,18 @@ function buildMinimumRequirementInput(requirement: any): any {
 
   if (requirement.type === "quantity") {
     return {
-      greaterThanOrEqualToQuantity: requirement.quantity.toString(),
+      quantity: { greaterThanOrEqualToQuantity: requirement.quantity },
     };
   } else if (requirement.type === "subtotal") {
+    // API examples accept a scalar number for subtotal; use numeric if possible
+    const amt =
+      requirement.amount !== undefined ? Number(requirement.amount) : undefined;
     return {
-      greaterThanOrEqualToSubtotal: {
-        amount: requirement.amount,
-      },
+      subtotal: { greaterThanOrEqualToSubtotal: amt },
+    };
+  } else if (requirement.type === "items") {
+    return {
+      items: { greaterThanOrEqualToItems: requirement.quantity },
     };
   }
 
@@ -818,6 +887,21 @@ function buildShippingDestinationInput(destination: any): any {
   }
 
   return { all: true };
+}
+
+/**
+ * Parse a minimum subtotal from a human-readable summary string as a fallback
+ * Example summary: "Free shipping on all products • Minimum purchase of $1,000.00 • For all countries"
+ */
+function parseMinimumFromSummary(
+  summary: any
+): { type: string; amount?: string } | undefined {
+  if (!summary || typeof summary !== "string") return undefined;
+  const re = /Minimum purchase of \$?([\d,]+(?:\.\d+)?)/i;
+  const m = summary.match(re);
+  if (!m) return undefined;
+  const num = m[1].replace(/,/g, "");
+  return { type: "subtotal", amount: num };
 }
 
 /**

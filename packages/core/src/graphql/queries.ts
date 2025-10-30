@@ -1518,15 +1518,210 @@ export const DISCOUNTS_CODE_BULK = `
           __typename
           ... on DiscountCodeBasic {
             title status summary startsAt endsAt usageLimit appliesOncePerCustomer asyncUsageCount
+            recurringCycleLimit
             codes(first: 250) { edges { node { code } } }
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
+            minimumRequirement {
+              __typename
+              ... on DiscountMinimumSubtotal {
+                greaterThanOrEqualToSubtotal { amount currencyCode }
+              }
+              ... on DiscountMinimumQuantity {
+                greaterThanOrEqualToQuantity
+              }
+            }
+            customerGets {
+              appliesOnOneTimePurchase appliesOnSubscription
+              value {
+                __typename
+                ... on DiscountPercentage { percentage }
+                ... on DiscountAmount { amount { amount currencyCode } appliesOnEachItem }
+              }
+            }
           }
           ... on DiscountCodeBxgy {
             title status summary startsAt endsAt usageLimit appliesOncePerCustomer asyncUsageCount
+            usesPerOrderLimit
             codes(first: 250) { edges { node { code } } }
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
+            customerGets {
+              appliesOnOneTimePurchase appliesOnSubscription
+            }
           }
           ... on DiscountCodeFreeShipping {
             title status summary startsAt endsAt usageLimit appliesOncePerCustomer asyncUsageCount
+            recurringCycleLimit appliesOnOneTimePurchase appliesOnSubscription
+            maximumShippingPrice { amount currencyCode }
             codes(first: 250) { edges { node { code } } }
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
+            minimumRequirement {
+              __typename
+              ... on DiscountMinimumSubtotal {
+                greaterThanOrEqualToSubtotal { amount currencyCode }
+              }
+              ... on DiscountMinimumQuantity {
+                greaterThanOrEqualToQuantity
+              }
+            }
+            destinationSelection {
+              __typename
+              ... on DiscountCountries {
+                countries includeRestOfWorld
+              }
+              ... on DiscountCountryAll {
+                allCountries
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+// Split query for DiscountCodeBasic with full product/collection details
+export const DISCOUNTS_CODE_BASIC_BULK = `
+{
+  codeDiscountNodes(first: 250) {
+    edges {
+      node {
+        id
+        codeDiscount {
+          __typename
+          ... on DiscountCodeBasic {
+            title status summary startsAt endsAt usageLimit appliesOncePerCustomer asyncUsageCount
+            recurringCycleLimit
+            codes(first: 250) { edges { node { code } } }
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
+            minimumRequirement {
+              __typename
+              ... on DiscountMinimumSubtotal {
+                greaterThanOrEqualToSubtotal { amount currencyCode }
+              }
+              ... on DiscountMinimumQuantity {
+                greaterThanOrEqualToQuantity
+              }
+            }
+            customerGets {
+              appliesOnOneTimePurchase appliesOnSubscription
+              value {
+                __typename
+                ... on DiscountPercentage { percentage }
+                ... on DiscountAmount { amount { amount currencyCode } appliesOnEachItem }
+              }
+              items {
+                __typename
+                ... on AllDiscountItems { allItems }
+                ... on DiscountProducts {
+                  products(first: 250) { edges { node { id handle } } }
+                }
+                ... on DiscountCollections {
+                  collections(first: 250) { edges { node { id handle } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+// Split query for DiscountCodeBxgy (limited to 5 connections - can't query both customerBuys AND customerGets items with products/collections)
+// Connection count: codeDiscountNodes(1) + codes(2) + customerGets.products(3) + customerGets.collections(4) = 4 connections
+export const DISCOUNTS_CODE_BXGY_BULK = `
+{
+  codeDiscountNodes(first: 250) {
+    edges {
+      node {
+        id
+        codeDiscount {
+          __typename
+          ... on DiscountCodeBxgy {
+            title status summary startsAt endsAt usageLimit appliesOncePerCustomer asyncUsageCount
+            usesPerOrderLimit
+            codes(first: 250) { edges { node { code } } }
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
+            customerBuys {
+              items {
+                __typename
+                ... on AllDiscountItems { allItems }
+              }
+              value {
+                __typename
+                ... on DiscountQuantity { quantity }
+                ... on DiscountPurchaseAmount { amount }
+              }
+            }
+            customerGets {
+              appliesOnOneTimePurchase appliesOnSubscription
+              value {
+                __typename
+                ... on DiscountPercentage { percentage }
+                ... on DiscountAmount { amount { amount currencyCode } appliesOnEachItem }
+                ... on DiscountOnQuantity {
+                  quantity { quantity }
+                  effect {
+                    __typename
+                    ... on DiscountPercentage { percentage }
+                    ... on DiscountAmount { amount { amount currencyCode } appliesOnEachItem }
+                  }
+                }
+              }
+              items {
+                __typename
+                ... on AllDiscountItems { allItems }
+                ... on DiscountProducts {
+                  products(first: 250) { edges { node { id handle } } }
+                }
+                ... on DiscountCollections {
+                  collections(first: 250) { edges { node { id handle } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+// Split query for DiscountCodeFreeShipping (no products/collections needed)
+export const DISCOUNTS_CODE_FREE_SHIPPING_BULK = `
+{
+  codeDiscountNodes(first: 250) {
+    edges {
+      node {
+        id
+        codeDiscount {
+          __typename
+          ... on DiscountCodeFreeShipping {
+            title status summary startsAt endsAt usageLimit appliesOncePerCustomer asyncUsageCount
+            recurringCycleLimit appliesOnOneTimePurchase appliesOnSubscription
+            maximumShippingPrice { amount currencyCode }
+            codes(first: 250) { edges { node { code } } }
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
+            minimumRequirement {
+              __typename
+              ... on DiscountMinimumSubtotal {
+                greaterThanOrEqualToSubtotal { amount currencyCode }
+              }
+              ... on DiscountMinimumQuantity {
+                greaterThanOrEqualToQuantity
+              }
+            }
+            destinationSelection {
+              __typename
+              ... on DiscountCountries {
+                countries includeRestOfWorld
+              }
+              ... on DiscountCountryAll {
+                allCountries
+              }
+            }
           }
         }
       }
@@ -1546,12 +1741,204 @@ export const DISCOUNTS_AUTOMATIC_BULK = `
           __typename
           ... on DiscountAutomaticBasic {
             title status summary startsAt endsAt
+            recurringCycleLimit
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
+            minimumRequirement {
+              __typename
+              ... on DiscountMinimumSubtotal {
+                greaterThanOrEqualToSubtotal { amount currencyCode }
+              }
+              ... on DiscountMinimumQuantity {
+                greaterThanOrEqualToQuantity
+              }
+            }
+            customerGets {
+              appliesOnOneTimePurchase appliesOnSubscription
+              value {
+                __typename
+                ... on DiscountPercentage { percentage }
+                ... on DiscountAmount { amount { amount currencyCode } appliesOnEachItem }
+              }
+            }
           }
           ... on DiscountAutomaticBxgy {
             title status summary startsAt endsAt
+            usesPerOrderLimit
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
+            customerGets {
+              appliesOnOneTimePurchase appliesOnSubscription
+            }
           }
           ... on DiscountAutomaticFreeShipping {
             title status summary startsAt endsAt
+            recurringCycleLimit appliesOnOneTimePurchase appliesOnSubscription
+            maximumShippingPrice { amount currencyCode }
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
+            minimumRequirement {
+              __typename
+              ... on DiscountMinimumSubtotal {
+                greaterThanOrEqualToSubtotal { amount currencyCode }
+              }
+              ... on DiscountMinimumQuantity {
+                greaterThanOrEqualToQuantity
+              }
+            }
+            destinationSelection {
+              __typename
+              ... on DiscountCountries {
+                countries includeRestOfWorld
+              }
+              ... on DiscountCountryAll {
+                allCountries
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+// Split query for DiscountAutomaticBasic with full product/collection details
+export const DISCOUNTS_AUTOMATIC_BASIC_BULK = `
+{
+  automaticDiscountNodes(first: 250) {
+    edges {
+      node {
+        id
+        automaticDiscount {
+          __typename
+          ... on DiscountAutomaticBasic {
+            title status summary startsAt endsAt
+            recurringCycleLimit
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
+            minimumRequirement {
+              __typename
+              ... on DiscountMinimumSubtotal {
+                greaterThanOrEqualToSubtotal { amount currencyCode }
+              }
+              ... on DiscountMinimumQuantity {
+                greaterThanOrEqualToQuantity
+              }
+            }
+            customerGets {
+              appliesOnOneTimePurchase appliesOnSubscription
+              value {
+                __typename
+                ... on DiscountPercentage { percentage }
+                ... on DiscountAmount { amount { amount currencyCode } appliesOnEachItem }
+              }
+              items {
+                __typename
+                ... on AllDiscountItems { allItems }
+                ... on DiscountProducts {
+                  products(first: 250) { edges { node { id handle } } }
+                }
+                ... on DiscountCollections {
+                  collections(first: 250) { edges { node { id handle } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+// Split query for DiscountAutomaticBxgy (limited to 5 connections - can't query both customerBuys AND customerGets items with products/collections)
+// Connection count: automaticDiscountNodes(1) + customerGets.products(2) + customerGets.collections(3) = 3 connections
+export const DISCOUNTS_AUTOMATIC_BXGY_BULK = `
+{
+  automaticDiscountNodes(first: 250) {
+    edges {
+      node {
+        id
+        automaticDiscount {
+          __typename
+          ... on DiscountAutomaticBxgy {
+            title status summary startsAt endsAt
+            usesPerOrderLimit
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
+            customerBuys {
+              items {
+                __typename
+                ... on AllDiscountItems { allItems }
+              }
+              value {
+                __typename
+                ... on DiscountQuantity { quantity }
+                ... on DiscountPurchaseAmount { amount }
+              }
+            }
+            customerGets {
+              appliesOnOneTimePurchase appliesOnSubscription
+              value {
+                __typename
+                ... on DiscountPercentage { percentage }
+                ... on DiscountAmount { amount { amount currencyCode } appliesOnEachItem }
+                ... on DiscountOnQuantity {
+                  quantity { quantity }
+                  effect {
+                    __typename
+                    ... on DiscountPercentage { percentage }
+                    ... on DiscountAmount { amount { amount currencyCode } appliesOnEachItem }
+                  }
+                }
+              }
+              items {
+                __typename
+                ... on AllDiscountItems { allItems }
+                ... on DiscountProducts {
+                  products(first: 250) { edges { node { id handle } } }
+                }
+                ... on DiscountCollections {
+                  collections(first: 250) { edges { node { id handle } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+// Split query for DiscountAutomaticFreeShipping (no products/collections needed)
+export const DISCOUNTS_AUTOMATIC_FREE_SHIPPING_BULK = `
+{
+  automaticDiscountNodes(first: 250) {
+    edges {
+      node {
+        id
+        automaticDiscount {
+          __typename
+          ... on DiscountAutomaticFreeShipping {
+            title status summary startsAt endsAt
+            recurringCycleLimit appliesOnOneTimePurchase appliesOnSubscription
+            maximumShippingPrice { amount currencyCode }
+            combinesWith { orderDiscounts productDiscounts shippingDiscounts }
+            minimumRequirement {
+              __typename
+              ... on DiscountMinimumSubtotal {
+                greaterThanOrEqualToSubtotal { amount currencyCode }
+              }
+              ... on DiscountMinimumQuantity {
+                greaterThanOrEqualToQuantity
+              }
+            }
+            destinationSelection {
+              __typename
+              ... on DiscountCountries {
+                countries includeRestOfWorld
+              }
+              ... on DiscountCountryAll {
+                allCountries
+              }
+            }
           }
         }
       }

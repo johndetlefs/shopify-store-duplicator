@@ -8,8 +8,24 @@
  * - Export complete discount configurations including:
  *   - Title, status, dates, usage limits
  *   - Customer eligibility, minimum requirements
- *   - Discount values (percentage/fixed amount)
- *   - Applicable products/collections/variants
+ *   - Discount values (percenta  } else if (type === "DiscountCodeBxgy") {
+    return {
+      ...baseFields,
+      type: "DiscountCodeBxgy",
+      customerBuys: {
+        items: transformDiscountItems(discount.customerBuys.items),
+        value: transformBxgyValue(discount.customerBuys.value),
+      },
+      customerGets: {
+        value: transformDiscountValue(discount.customerGets.value),
+        items: transformDiscountItems(discount.customerGets.items),
+        appliesOnOneTimePurchase:
+          discount.customerGets.appliesOnOneTimePurchase,
+        appliesOnSubscription: discount.customerGets.appliesOnSubscription,
+      },
+      customerSelection: transformCustomerSelection(discount.customerSelection),
+      usesPerOrderLimit: discount.usesPerOrderLimit,
+    } as DumpedDiscount; *   - Applicable products/collections/variants
  *   - Discount codes (for code discounts)
  *   - Combination settings
  * - Preserve natural keys (handles) for products/collections/variants
@@ -29,8 +45,18 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { GraphQLClient } from "../graphql/client.js";
 import {
-  DISCOUNTS_CODE_BULK,
-  DISCOUNTS_AUTOMATIC_BULK,
+  DISCOUNTS_CODE_BASIC_BULK,
+  DISCOUNTS_CODE_BXGY_BULK,
+  DISCOUNTS_CODE_FREE_SHIPPING_BULK,
+  DISCOUNTS_AUTOMATIC_BASIC_BULK,
+  DISCOUNTS_AUTOMATIC_BXGY_BULK,
+  DISCOUNTS_AUTOMATIC_FREE_SHIPPING_BULK,
+  DISCOUNT_CODE_BASIC_CREATE,
+  DISCOUNT_CODE_BXGY_CREATE,
+  DISCOUNT_CODE_FREE_SHIPPING_CREATE,
+  DISCOUNT_AUTOMATIC_BASIC_CREATE,
+  DISCOUNT_AUTOMATIC_BXGY_CREATE,
+  DISCOUNT_AUTOMATIC_FREE_SHIPPING_CREATE,
 } from "../graphql/queries.js";
 import { runBulkQueryAndDownload } from "../bulk/runner.js";
 import { logger } from "../utils/logger.js";
@@ -57,6 +83,7 @@ export interface BaseDiscount {
   summary?: string;
   startsAt?: string;
   endsAt?: string;
+  recurringCycleLimit?: number;
   combinesWith?: {
     orderDiscounts?: boolean;
     productDiscounts?: boolean;
@@ -136,6 +163,10 @@ export type MinimumRequirement =
   | {
       type: "subtotal";
       amount: string;
+    }
+  | {
+      type: "items";
+      quantity: number;
     }
   | {
       type: "none";
@@ -246,37 +277,140 @@ export async function dumpDiscounts(
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    // Run code discounts bulk query
-    logger.info("Fetching code discounts via bulk operation...");
-    const codeBulkResult = await runBulkQueryAndDownload(
-      client,
-      DISCOUNTS_CODE_BULK
-    );
-    if (!codeBulkResult.ok) {
-      return err(codeBulkResult.error);
-    }
     const codeDiscounts: DumpedDiscount[] = [];
-    for await (const line of codeBulkResult.data) {
+    const automaticDiscounts: DumpedDiscount[] = [];
+
+    // Run code discounts bulk queries (split by type to stay under 5 connection limit)
+    logger.info("Fetching code Basic discounts via bulk operation...");
+    const codeBasicResult = await runBulkQueryAndDownload(
+      client,
+      DISCOUNTS_CODE_BASIC_BULK
+    );
+    if (!codeBasicResult.ok) {
+      return err(codeBasicResult.error);
+    }
+    for await (const line of codeBasicResult.data) {
       if (line.codeDiscount) {
-        const discount = transformCodeDiscount(line);
-        if (discount) codeDiscounts.push(discount);
+        logger.debug("Raw Basic discount line", { line: JSON.stringify(line) });
+        // Only process if it's actually a Basic discount
+        if (line.codeDiscount.__typename === "DiscountCodeBasic") {
+          const discount = transformCodeDiscount(line);
+          if (discount) {
+            logger.debug("Transformed Basic discount", { discount });
+            codeDiscounts.push(discount);
+          } else {
+            logger.warn("Failed to transform Basic discount", { line });
+          }
+        }
       }
     }
 
-    // Run automatic discounts bulk query
-    logger.info("Fetching automatic discounts via bulk operation...");
-    const autoBulkResult = await runBulkQueryAndDownload(
+    logger.info("Fetching code BXGY discounts via bulk operation...");
+    const codeBxgyResult = await runBulkQueryAndDownload(
       client,
-      DISCOUNTS_AUTOMATIC_BULK
+      DISCOUNTS_CODE_BXGY_BULK
     );
-    if (!autoBulkResult.ok) {
-      return err(autoBulkResult.error);
+    if (!codeBxgyResult.ok) {
+      return err(codeBxgyResult.error);
     }
-    const automaticDiscounts: DumpedDiscount[] = [];
-    for await (const line of autoBulkResult.data) {
+    for await (const line of codeBxgyResult.data) {
+      if (line.codeDiscount) {
+        logger.debug("Raw BXGY discount line", { line: JSON.stringify(line) });
+        // Only process if it's actually a BXGY discount
+        if (line.codeDiscount.__typename === "DiscountCodeBxgy") {
+          const discount = transformCodeDiscount(line);
+          if (discount) {
+            logger.debug("Transformed BXGY discount", { discount });
+            codeDiscounts.push(discount);
+          } else {
+            logger.warn("Failed to transform BXGY discount", { line });
+          }
+        }
+      }
+    }
+
+    logger.info("Fetching code FreeShipping discounts via bulk operation...");
+    const codeFreeShippingResult = await runBulkQueryAndDownload(
+      client,
+      DISCOUNTS_CODE_FREE_SHIPPING_BULK
+    );
+    if (!codeFreeShippingResult.ok) {
+      return err(codeFreeShippingResult.error);
+    }
+    for await (const line of codeFreeShippingResult.data) {
+      if (line.codeDiscount) {
+        logger.debug("Raw FreeShipping discount line", {
+          line: JSON.stringify(line),
+        });
+        // Only process if it's actually a FreeShipping discount
+        if (line.codeDiscount.__typename === "DiscountCodeFreeShipping") {
+          const discount = transformCodeDiscount(line);
+          if (discount) {
+            logger.debug("Transformed FreeShipping discount", { discount });
+            codeDiscounts.push(discount);
+          } else {
+            logger.warn("Failed to transform FreeShipping discount", { line });
+          }
+        }
+      }
+    }
+
+    // Run automatic discounts bulk queries (split by type to stay under 5 connection limit)
+    logger.info("Fetching automatic Basic discounts via bulk operation...");
+    const autoBasicResult = await runBulkQueryAndDownload(
+      client,
+      DISCOUNTS_AUTOMATIC_BASIC_BULK
+    );
+    if (!autoBasicResult.ok) {
+      return err(autoBasicResult.error);
+    }
+    for await (const line of autoBasicResult.data) {
       if (line.automaticDiscount) {
-        const discount = transformAutomaticDiscount(line);
-        if (discount) automaticDiscounts.push(discount);
+        // Only process if it's actually a Basic discount
+        if (line.automaticDiscount.__typename === "DiscountAutomaticBasic") {
+          const discount = transformAutomaticDiscount(line);
+          if (discount) automaticDiscounts.push(discount);
+        }
+      }
+    }
+
+    logger.info("Fetching automatic BXGY discounts via bulk operation...");
+    const autoBxgyResult = await runBulkQueryAndDownload(
+      client,
+      DISCOUNTS_AUTOMATIC_BXGY_BULK
+    );
+    if (!autoBxgyResult.ok) {
+      return err(autoBxgyResult.error);
+    }
+    for await (const line of autoBxgyResult.data) {
+      if (line.automaticDiscount) {
+        // Only process if it's actually a BXGY discount
+        if (line.automaticDiscount.__typename === "DiscountAutomaticBxgy") {
+          const discount = transformAutomaticDiscount(line);
+          if (discount) automaticDiscounts.push(discount);
+        }
+      }
+    }
+
+    logger.info(
+      "Fetching automatic FreeShipping discounts via bulk operation..."
+    );
+    const autoFreeShippingResult = await runBulkQueryAndDownload(
+      client,
+      DISCOUNTS_AUTOMATIC_FREE_SHIPPING_BULK
+    );
+    if (!autoFreeShippingResult.ok) {
+      return err(autoFreeShippingResult.error);
+    }
+    for await (const line of autoFreeShippingResult.data) {
+      if (line.automaticDiscount) {
+        // Only process if it's actually a FreeShipping discount
+        if (
+          line.automaticDiscount.__typename === "DiscountAutomaticFreeShipping"
+        ) {
+          const discount = transformAutomaticDiscount(line);
+          if (discount) automaticDiscounts.push(discount);
+        }
       }
     }
 
@@ -336,6 +470,7 @@ function transformCodeDiscount(node: any): DumpedDiscount | null {
     usageLimit: discount.usageLimit,
     appliesOncePerCustomer: discount.appliesOncePerCustomer,
     asyncUsageCount: discount.asyncUsageCount,
+    recurringCycleLimit: discount.recurringCycleLimit,
   };
 
   if (type === "DiscountCodeBasic") {
@@ -373,14 +508,16 @@ function transformCodeDiscount(node: any): DumpedDiscount | null {
       usesPerOrderLimit: discount.usesPerOrderLimit,
     } as DumpedDiscount;
   } else if (type === "DiscountCodeFreeShipping") {
+    let minReq = transformMinimumRequirement(discount.minimumRequirement);
+    if (!minReq || (minReq as any).type === "none") {
+      minReq = parseMinimumFromSummary(discount.summary);
+    }
     return {
       ...baseFields,
       type: "DiscountCodeFreeShipping",
       customerSelection: transformCustomerSelection(discount.customerSelection),
-      minimumRequirement: transformMinimumRequirement(
-        discount.minimumRequirement
-      ),
-      destination: transformShippingDestination(discount.destination),
+      minimumRequirement: minReq,
+      destination: transformShippingDestination(discount.destinationSelection),
       maximumShippingPrice: discount.maximumShippingPrice?.amount,
       appliesOnOneTimePurchase: discount.appliesOnOneTimePurchase,
       appliesOnSubscription: discount.appliesOnSubscription,
@@ -407,6 +544,7 @@ function transformAutomaticDiscount(node: any): DumpedDiscount | null {
     startsAt: discount.startsAt,
     endsAt: discount.endsAt,
     combinesWith: discount.combinesWith,
+    recurringCycleLimit: discount.recurringCycleLimit,
   };
 
   if (type === "DiscountAutomaticBasic") {
@@ -448,7 +586,7 @@ function transformAutomaticDiscount(node: any): DumpedDiscount | null {
       minimumRequirement: transformMinimumRequirement(
         discount.minimumRequirement
       ),
-      destination: transformShippingDestination(discount.destination),
+      destination: transformShippingDestination(discount.destinationSelection),
       maximumShippingPrice: discount.maximumShippingPrice?.amount,
       appliesOnOneTimePurchase: discount.appliesOnOneTimePurchase,
       appliesOnSubscription: discount.appliesOnSubscription,
@@ -553,11 +691,27 @@ function transformMinimumRequirement(
       type: "quantity",
       quantity: requirement.greaterThanOrEqualToQuantity,
     };
-  } else if (requirement.greaterThanOrEqualToSubtotal) {
+  } else if (requirement.greaterThanOrEqualToSubtotal !== undefined) {
+    // API returns MoneyV2 for subtotal: { amount: string, currencyCode: string }
+    const subtotal = requirement.greaterThanOrEqualToSubtotal;
+    const amount =
+      subtotal && (subtotal.amount ?? subtotal)
+        ? subtotal.amount ?? subtotal
+        : undefined;
     return {
       type: "subtotal",
-      amount: requirement.greaterThanOrEqualToSubtotal.amount,
+      amount: amount,
     };
+  } else if (requirement.greaterThanOrEqualToItems !== undefined) {
+    return {
+      type: "items",
+      quantity: requirement.greaterThanOrEqualToItems,
+    };
+  } else if (
+    requirement.message !== undefined ||
+    requirement.__typename === "DiscountNoMinimum"
+  ) {
+    return { type: "none" };
   }
 
   return { type: "none" };
@@ -594,4 +748,17 @@ function transformShippingDestination(
   }
 
   return { type: "all" };
+}
+
+/**
+ * Parse a minimum subtotal from a human-readable summary string as a fallback
+ * Example summary: "Free shipping on all products • Minimum purchase of $1,000.00 • For all countries"
+ */
+function parseMinimumFromSummary(summary: any): MinimumRequirement | undefined {
+  if (!summary || typeof summary !== "string") return undefined;
+  const re = /Minimum purchase of \$?([\d,]+(?:\.\d+)?)/i;
+  const m = summary.match(re);
+  if (!m) return undefined;
+  const num = m[1].replace(/,/g, "");
+  return { type: "subtotal", amount: num };
 }

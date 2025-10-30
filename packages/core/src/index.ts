@@ -28,6 +28,7 @@ export * from "./defs/diff.js";
 export * from "./migration/dump.js";
 export * from "./migration/apply.js";
 export * from "./migration/diff.js";
+export * from "./migration/enrich-references.js";
 
 // Files
 export * from "./files/dump.js";

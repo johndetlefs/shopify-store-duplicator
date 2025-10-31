@@ -438,12 +438,6 @@ async function updateDiscount(
             destinationIndex
           ),
         };
-        // eslint-disable-next-line no-console
-        console.log("\n=== UPDATING DISCOUNT CODE FREE SHIPPING ===");
-        // eslint-disable-next-line no-console
-        console.log("Variables:", JSON.stringify(variables, null, 2));
-        // eslint-disable-next-line no-console
-        console.log("==========================================\n");
         break;
 
       case "DiscountAutomaticBasic":

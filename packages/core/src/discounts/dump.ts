@@ -47,9 +47,11 @@ import { GraphQLClient } from "../graphql/client.js";
 import {
   DISCOUNTS_CODE_BASIC_BULK,
   DISCOUNTS_CODE_BXGY_BULK,
+  DISCOUNTS_CODE_BXGY_BUYS_BULK,
   DISCOUNTS_CODE_FREE_SHIPPING_BULK,
   DISCOUNTS_AUTOMATIC_BASIC_BULK,
   DISCOUNTS_AUTOMATIC_BXGY_BULK,
+  DISCOUNTS_AUTOMATIC_BXGY_BUYS_BULK,
   DISCOUNTS_AUTOMATIC_FREE_SHIPPING_BULK,
   DISCOUNT_CODE_BASIC_CREATE,
   DISCOUNT_CODE_BXGY_CREATE,
@@ -313,11 +315,51 @@ export async function dumpDiscounts(
     if (!codeBxgyResult.ok) {
       return err(codeBxgyResult.error);
     }
+
+    // Also fetch customerBuys items separately (split query to stay under 5-connection limit)
+    logger.info("Fetching code BXGY customerBuys items via bulk operation...");
+    const codeBxgyBuysResult = await runBulkQueryAndDownload(
+      client,
+      DISCOUNTS_CODE_BXGY_BUYS_BULK
+    );
+    if (!codeBxgyBuysResult.ok) {
+      return err(codeBxgyBuysResult.error);
+    }
+
+    // Build a map of customerBuys items by discount title
+    const bxgyBuysMap = new Map<string, any>();
+    for await (const line of codeBxgyBuysResult.data) {
+      if (
+        line.codeDiscount?.__typename === "DiscountCodeBxgy" &&
+        line.codeDiscount.title
+      ) {
+        bxgyBuysMap.set(
+          line.codeDiscount.title,
+          line.codeDiscount.customerBuys
+        );
+      }
+    }
+
+    // Process main BXGY results and merge with customerBuys data
     for await (const line of codeBxgyResult.data) {
       if (line.codeDiscount) {
         logger.debug("Raw BXGY discount line", { line: JSON.stringify(line) });
         // Only process if it's actually a BXGY discount
         if (line.codeDiscount.__typename === "DiscountCodeBxgy") {
+          // Merge customerBuys items from the separate query
+          if (
+            line.codeDiscount.title &&
+            bxgyBuysMap.has(line.codeDiscount.title)
+          ) {
+            const buysData = bxgyBuysMap.get(line.codeDiscount.title);
+            if (buysData?.items) {
+              line.codeDiscount.customerBuys.items = buysData.items;
+              logger.debug("Merged customerBuys items for BXGY discount", {
+                title: line.codeDiscount.title,
+              });
+            }
+          }
+
           const discount = transformCodeDiscount(line);
           if (discount) {
             logger.debug("Transformed BXGY discount", { discount });
@@ -382,10 +424,55 @@ export async function dumpDiscounts(
     if (!autoBxgyResult.ok) {
       return err(autoBxgyResult.error);
     }
+
+    // Also fetch customerBuys items separately (split query to stay under 5-connection limit)
+    logger.info(
+      "Fetching automatic BXGY customerBuys items via bulk operation..."
+    );
+    const autoBxgyBuysResult = await runBulkQueryAndDownload(
+      client,
+      DISCOUNTS_AUTOMATIC_BXGY_BUYS_BULK
+    );
+    if (!autoBxgyBuysResult.ok) {
+      return err(autoBxgyBuysResult.error);
+    }
+
+    // Build a map of customerBuys items by discount title
+    const autoBxgyBuysMap = new Map<string, any>();
+    for await (const line of autoBxgyBuysResult.data) {
+      if (
+        line.automaticDiscount?.__typename === "DiscountAutomaticBxgy" &&
+        line.automaticDiscount.title
+      ) {
+        autoBxgyBuysMap.set(
+          line.automaticDiscount.title,
+          line.automaticDiscount.customerBuys
+        );
+      }
+    }
+
+    // Process main BXGY results and merge with customerBuys data
     for await (const line of autoBxgyResult.data) {
       if (line.automaticDiscount) {
         // Only process if it's actually a BXGY discount
         if (line.automaticDiscount.__typename === "DiscountAutomaticBxgy") {
+          // Merge customerBuys items from the separate query
+          if (
+            line.automaticDiscount.title &&
+            autoBxgyBuysMap.has(line.automaticDiscount.title)
+          ) {
+            const buysData = autoBxgyBuysMap.get(line.automaticDiscount.title);
+            if (buysData?.items) {
+              line.automaticDiscount.customerBuys.items = buysData.items;
+              logger.debug(
+                "Merged customerBuys items for automatic BXGY discount",
+                {
+                  title: line.automaticDiscount.title,
+                }
+              );
+            }
+          }
+
           const discount = transformAutomaticDiscount(line);
           if (discount) automaticDiscounts.push(discount);
         }

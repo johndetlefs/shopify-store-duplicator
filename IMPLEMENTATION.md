@@ -210,6 +210,39 @@
    - 🔲 `pages.ts` - Delete pages (NOT YET IMPLEMENTED)
    - 🔲 `blogs.ts` - Delete blogs (NOT YET IMPLEMENTED)
 
+1. **Discounts** (`packages/core/src/discounts/`) ✨ **COMPLETE**
+
+   - ✅ `dump.ts` - Export all discounts (automatic & code-based) (850+ lines): ✨ **NEW**
+
+     - **10 separate bulk queries** (split by discount type to respect 5-connection limit):
+       - `DISCOUNTS_CODE_BASIC_BULK` - Basic code discounts with product/collection targeting
+       - `DISCOUNTS_CODE_BXGY_BULK` - BXGY code discounts (customerGets items)
+       - `DISCOUNTS_CODE_BXGY_BUYS_BULK` - BXGY code discounts (customerBuys items) **[NEW]**
+       - `DISCOUNTS_CODE_FREE_SHIPPING_BULK` - Free shipping code discounts
+       - `DISCOUNTS_AUTOMATIC_BASIC_BULK` - Basic automatic discounts with targeting
+       - `DISCOUNTS_AUTOMATIC_BXGY_BULK` - BXGY automatic discounts (customerGets items)
+       - `DISCOUNTS_AUTOMATIC_BXGY_BUYS_BULK` - BXGY automatic discounts (customerBuys items) **[NEW]**
+       - `DISCOUNTS_AUTOMATIC_FREE_SHIPPING_BULK` - Free shipping automatic discounts
+     - **BXGY merge logic**: Runs 2 queries per BXGY type (one for customerGets, one for customerBuys), then merges results by discount title
+     - **Type filtering** after fetch (Shopify returns all types, filter by `__typename`)
+     - Extracts all discount settings: codes, limits, minimums, combinations, subscription fields
+     - Preserves natural keys for products/collections in discount rules
+     - Transform functions for each discount type (Basic, BXGY, FreeShipping)
+     - **Files**: `discounts.json` with codeDiscounts and automaticDiscounts arrays
+
+   - ✅ `apply.ts` - Import discounts with reference remapping (800+ lines): ✨ **NEW**
+
+     - Builds destination index for products/collections (handle → GID)
+     - Fetches existing discounts to enable update workflow
+     - Remaps product/collection references in discount rules (both customerBuys AND customerGets for BXGY)
+     - Creates/updates discounts by title (idempotent)
+     - **Conditional subscription field handling** (only include when `appliesOnSubscription === true`)
+     - Separate mutations for each discount type (6 total: create + update × 3 types)
+     - Comprehensive error handling with per-discount stats
+     - **Pattern**: Title-based matching, deterministic remapping
+
+   - **Complete BXGY Support**: Both `customerBuys` (what triggers) and `customerGets` (what they receive) now capture full product/collection targeting details by running complementary bulk queries and merging results.
+
 1. **CLI Application** (`apps/cli/src/`)
 
 - ✅ `index.ts` - Commander-based CLI with:
@@ -230,6 +263,10 @@
   - `menus:apply` - Apply menus with URL remapping
   - `redirects:dump` - Dump URL redirects to JSON
   - `redirects:apply` - Apply redirects with idempotent creation
+  - `policies:dump` - Dump shop policies to JSON
+  - `policies:apply` - Apply shop policies (refund, privacy, terms, shipping, contact)
+  - `discounts:dump` - Dump all discounts (automatic + code-based) to JSON ✨ **NEW**
+  - `discounts:apply` - Apply discounts with product/collection remapping ✨ **NEW**
   - Environment variable support (.env)
   - Comprehensive stats display (including file upload counts)
 
@@ -588,6 +625,8 @@ These are **nice-to-have** improvements, not required for production use:
 - Reference remapping (all types including variants, files, blogs, articles)
 - Menus dump/apply with URL remapping
 - Redirects dump/apply with idempotent creation
+- Policies dump/apply (refund, privacy, terms, shipping, contact)
+- **Discounts dump/apply (automatic + code-based: Basic, BXGY, Free Shipping)** ✨ **NEW**
 - Diff commands for validation (defs + data)
 - Batch processing
 - Error handling
@@ -647,15 +686,15 @@ All specified features have been implemented and tested. The Shopify Store Dupli
 - ✅ **Files (media library) with automatic relinking and idempotent updates** ✨
 - ✅ Navigation menus with URL remapping
 - ✅ URL redirects
+- ✅ Shop policies (refund, privacy, terms, shipping, contact)
+- ✅ **Discounts (automatic + code-based: Basic, BXGY, Free Shipping)** ✨ **NEW**
 - ✅ Full validation via diff commands
 - ✅ **All operations are idempotent (safe to re-run without duplicates)** ✨
 
-**Latest Update (Today):** Files are now 100% idempotent:
+**Latest Updates:**
 
-- Queries existing destination files before uploading
-- Updates files if alt text changed
-- Skips files that are already correct
-- Tracks stats: uploaded, updated, skipped, failed
-- No duplicates created on multiple runs
+- **Discounts (COMPLETE):** Full discount migration with 10 split bulk queries to capture complete BXGY targeting. For BXGY discounts, runs 2 queries (one for `customerBuys`, one for `customerGets`), then merges by title. Automatically remaps all product/collection references for both Basic and BXGY discount types. No limitations!
+
+- **Files (Idempotent):** Queries existing destination files before uploading, updates if alt text changed, skips unchanged files. No duplicates created on multiple runs.
 
 ### Optional Future Enhancements

@@ -1689,6 +1689,39 @@ export const DISCOUNTS_CODE_BXGY_BULK = `
 }
 `;
 
+// Complementary query for DiscountCodeBxgy to capture customerBuys items (products/collections)
+// This query captures what the customer BUYS (triggers), while the main query captures what they GET
+// Connection count: codeDiscountNodes(1) + codes(2) + customerBuys.products(3) + customerBuys.collections(4) = 4 connections
+export const DISCOUNTS_CODE_BXGY_BUYS_BULK = `
+{
+  codeDiscountNodes(first: 250) {
+    edges {
+      node {
+        id
+        codeDiscount {
+          __typename
+          ... on DiscountCodeBxgy {
+            title
+            customerBuys {
+              items {
+                __typename
+                ... on AllDiscountItems { allItems }
+                ... on DiscountProducts {
+                  products(first: 250) { edges { node { id handle } } }
+                }
+                ... on DiscountCollections {
+                  collections(first: 250) { edges { node { id handle } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
 // Split query for DiscountCodeFreeShipping (no products/collections needed)
 export const DISCOUNTS_CODE_FREE_SHIPPING_BULK = `
 {
@@ -1888,6 +1921,39 @@ export const DISCOUNTS_AUTOMATIC_BXGY_BULK = `
                   }
                 }
               }
+              items {
+                __typename
+                ... on AllDiscountItems { allItems }
+                ... on DiscountProducts {
+                  products(first: 250) { edges { node { id handle } } }
+                }
+                ... on DiscountCollections {
+                  collections(first: 250) { edges { node { id handle } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+// Complementary query for DiscountAutomaticBxgy to capture customerBuys items (products/collections)
+// This query captures what the customer BUYS (triggers), while the main query captures what they GET
+// Connection count: automaticDiscountNodes(1) + customerBuys.products(2) + customerBuys.collections(3) = 3 connections
+export const DISCOUNTS_AUTOMATIC_BXGY_BUYS_BULK = `
+{
+  automaticDiscountNodes(first: 250) {
+    edges {
+      node {
+        id
+        automaticDiscount {
+          __typename
+          ... on DiscountAutomaticBxgy {
+            title
+            customerBuys {
               items {
                 __typename
                 ... on AllDiscountItems { allItems }

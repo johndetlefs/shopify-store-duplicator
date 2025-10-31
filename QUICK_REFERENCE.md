@@ -25,6 +25,10 @@ npm run cli -- menus:dump -o menus.json && \
 npm run cli -- menus:apply -f menus.json && \
 npm run cli -- redirects:dump -o redirects.json && \
 npm run cli -- redirects:apply -f redirects.json && \
+npm run cli -- policies:dump -o policies.json && \
+npm run cli -- policies:apply -f policies.json && \
+npm run cli -- discounts:dump -o discounts.json && \
+npm run cli -- discounts:apply -f discounts.json && \
 echo "✅ Migration complete!"
 ````
 
@@ -84,6 +88,13 @@ npm run cli -- redirects:apply -f redirects.json # Import
 ```bash
 npm run cli -- policies:dump -o policies.json   # Export
 npm run cli -- policies:apply -f policies.json  # Import
+```
+
+### Discounts
+
+```bash
+npm run cli -- discounts:dump -o discounts.json # Export (automatic + code-based)
+npm run cli -- discounts:apply -f discounts.json # Import (with product/collection remapping)
 ```
 
 ### Discounts

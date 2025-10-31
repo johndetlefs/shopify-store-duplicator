@@ -14,6 +14,7 @@ Migrate **all custom data** from a source Shopify store to a destination store:
 - ✅ Navigation menus (with URL remapping)
 - ✅ URL redirects (SEO preservation)
 - ✅ Shop policies (refund, privacy, terms, shipping, contact)
+- ✅ Discounts (code-based & automatic: Basic, BXGY, Free Shipping)
 - ✅ Complete validation tools
 
 ## Why This Tool?
@@ -52,6 +53,8 @@ npm run cli -- redirects:dump -o redirects.json       # Export redirects
 npm run cli -- redirects:apply -f redirects.json      # Import redirects
 npm run cli -- policies:dump -o policies.json         # Export shop policies
 npm run cli -- policies:apply -f policies.json        # Import shop policies
+npm run cli -- discounts:dump -o discounts.json       # Export discounts
+npm run cli -- discounts:apply -f discounts.json      # Import discounts
 # OR for bulk imports (faster): --csv flag + manual import via Shopify Admin
 
 # 4. Validate
@@ -169,7 +172,27 @@ npm run cli -- policies:apply -f policies.json
 
 Migrates shop policies (refund, privacy, terms of service, shipping, contact information). Note: Some policies may require disabling "automatic management" in Shopify admin before they can be updated.
 
-### Step 8: Validate
+### Step 8: Export & Import Discounts
+
+```bash
+npm run cli -- discounts:dump -o discounts.json
+npm run cli -- discounts:apply -f discounts.json
+```
+
+Migrates all discounts (automatic and code-based):
+
+- **Basic discounts** - Percentage or fixed amount off products/collections
+- **BXGY (Buy X Get Y)** - Buy specific products/quantities, get others free/discounted
+- **Free Shipping** - Free shipping with optional minimum purchase requirements
+
+**Features:**
+
+- Automatic product/collection reference remapping
+- Preserves all discount settings (codes, usage limits, minimum requirements, combinations)
+- Idempotent - safe to re-run without creating duplicates
+- **Complete BXGY support** - 10 separate bulk queries (2 per BXGY type) to capture full product/collection targeting for both `customerBuys` and `customerGets` while respecting Shopify's API limits
+
+### Step 9: Validate
 
 ```bash
 npm run cli -- defs:diff -f source-definitions.json
@@ -220,6 +243,7 @@ LOG_FORMAT=pretty       # pretty | json
    - `read_files`, `write_files`
    - `read_navigation`, `write_navigation`
    - `read_online_store_pages`, `write_online_store_pages`
+   - `read_discounts`, `write_discounts`
 5. **Save** → **Install app** → Copy the **Admin API access token**
 6. Repeat for both source and destination stores
 
@@ -248,7 +272,7 @@ npm run cli -- data:dump --collections-only -o <dir>
 npm run cli -- data:dump --pages-only -o <dir>
 ```
 
-### Menus, Redirects & Policies
+### Menus, Redirects, Policies & Discounts
 
 ```bash
 npm run cli -- menus:dump -o <file>       # Export menus
@@ -260,6 +284,9 @@ npm run cli -- redirects:apply -f <file>  # Import redirects
 
 npm run cli -- policies:dump -o <file>    # Export shop policies (refund, privacy, terms, shipping, contact)
 npm run cli -- policies:apply -f <file>   # Import shop policies
+
+npm run cli -- discounts:dump -o <file>   # Export discounts (automatic + code-based)
+npm run cli -- discounts:apply -f <file>  # Import discounts (with product/collection remapping)
 ```
 
 **CSV Import Option:**  
@@ -392,7 +419,6 @@ Check logs for warnings about unresolved references. Ensure source data was expo
 By design, the following are **not migrated** (different mechanisms or not custom data):
 
 ❌ Orders (transactional data)  
-❌ Discounts (business logic)  
 ❌ Gift cards (sensitive data)  
 ❌ Analytics (historical data)  
 ❌ Theme code (use theme transfer tools)  

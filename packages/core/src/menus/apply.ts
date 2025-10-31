@@ -20,7 +20,12 @@
 
 import * as fs from "node:fs";
 import { GraphQLClient } from "../graphql/client.js";
-import { MENU_CREATE, MENU_UPDATE, MENUS_QUERY } from "../graphql/queries.js";
+import {
+  MENU_CREATE,
+  MENU_UPDATE,
+  MENUS_QUERY,
+  SHOP_INFO_QUERY,
+} from "../graphql/queries.js";
 import { logger } from "../utils/logger.js";
 import { type Result, ok, err } from "../utils/types.js";
 import { type DestinationIndex } from "../map/ids.js";
@@ -77,8 +82,37 @@ interface ApplyStats {
 function remapMenuItemUrl(
   item: DumpedMenuItem,
   index: DestinationIndex,
-  destinationShop: string
+  destinationShop: string,
+  customerAccountUrl?: string
 ): string {
+  // Handle customer account pages - use the destination store's customer account URL
+  if (item.type === "CUSTOMER_ACCOUNT_PAGE") {
+    // Customer account URLs should use the store's customer account URL
+    // Extract the page path (e.g., "/account/orders" -> "orders")
+    const accountMatch = item.url.match(/\/account\/([^?#/]+)/);
+    if (accountMatch && customerAccountUrl) {
+      // customerAccountUrl is like "https://shopify.com/{store-id}/account"
+      // We need to append the specific page like "/orders"
+      const pagePath = accountMatch[1];
+      // Remove trailing /account if present, then add /account/{page}
+      const baseUrl = customerAccountUrl.replace(/\/account$/, "");
+      return `${baseUrl}/account/${pagePath}`;
+    }
+    // Fallback to relative URL if no customerAccountUrl provided
+    if (accountMatch) {
+      return `/account/${accountMatch[1]}`;
+    }
+    // If already in correct format
+    if (item.url.startsWith("/account/")) {
+      return item.url;
+    }
+    // Fallback
+    logger.warn(
+      `Could not parse customer account page URL: ${item.url}, using as-is`
+    );
+    return item.url;
+  }
+
   // If we have a natural key, try to remap
   if (item.productHandle && index.products.has(item.productHandle)) {
     return `/products/${item.productHandle}`;
@@ -113,11 +147,21 @@ function remapMenuItemUrl(
 function transformMenuItemForInput(
   item: DumpedMenuItem,
   index: DestinationIndex,
-  destinationShop: string
-): MenuItemInput {
+  destinationShop: string,
+  customerAccountUrl?: string
+): MenuItemInput | null {
+  // Skip CUSTOMER_ACCOUNT_PAGE items - these are not supported via Admin GraphQL API
+  // Customer account pages need to be configured through the Shopify admin UI
+  if (item.type === "CUSTOMER_ACCOUNT_PAGE") {
+    logger.warn(
+      `Skipping customer account page menu item "${item.title}" - not supported via API`
+    );
+    return null;
+  }
+
   const input: MenuItemInput = {
     title: item.title,
-    url: remapMenuItemUrl(item, index, destinationShop),
+    url: remapMenuItemUrl(item, index, destinationShop, customerAccountUrl),
     type: item.type,
   };
 
@@ -141,11 +185,21 @@ function transformMenuItemForInput(
     }
   }
 
-  // Recursively transform nested items
+  // Recursively transform nested items, filtering out nulls
   if (item.items && item.items.length > 0) {
-    input.items = item.items.map((childItem) =>
-      transformMenuItemForInput(childItem, index, destinationShop)
-    );
+    const transformedItems = item.items
+      .map((childItem) =>
+        transformMenuItemForInput(
+          childItem,
+          index,
+          destinationShop,
+          customerAccountUrl
+        )
+      )
+      .filter((item): item is MenuItemInput => item !== null);
+    if (transformedItems.length > 0) {
+      input.items = transformedItems;
+    }
   }
 
   return input;
@@ -212,6 +266,41 @@ export async function applyMenus(
     errors: [],
   };
 
+  // Query shop info to get customer account URL
+  let customerAccountUrl: string | undefined;
+  try {
+    const shopInfoResult = await client.request<{
+      shop: {
+        customerAccountsV2?: {
+          url?: string;
+        };
+      };
+    }>({
+      query: SHOP_INFO_QUERY,
+    });
+
+    if (shopInfoResult.ok) {
+      customerAccountUrl =
+        shopInfoResult.data.data?.shop?.customerAccountsV2?.url;
+      if (customerAccountUrl) {
+        logger.info(
+          `Found customer account URL: ${customerAccountUrl.replace(
+            /\/account$/,
+            ""
+          )}`
+        );
+      } else {
+        logger.warn(
+          "No customer account URL found - customer account page links may not work"
+        );
+      }
+    }
+  } catch (error) {
+    logger.warn("Failed to query shop info for customer account URL", {
+      error: String(error),
+    });
+  }
+
   // Read dump file
   if (!fs.existsSync(inputFile)) {
     logger.warn(`Menus dump not found: ${inputFile}`);
@@ -225,10 +314,17 @@ export async function applyMenus(
     stats.total++;
 
     try {
-      // Transform items with remapped URLs
-      const items = menu.items.map((item) =>
-        transformMenuItemForInput(item, index, destinationShop)
-      );
+      // Transform items with remapped URLs, filtering out null (skipped) items
+      const items = menu.items
+        .map((item) =>
+          transformMenuItemForInput(
+            item,
+            index,
+            destinationShop,
+            customerAccountUrl
+          )
+        )
+        .filter((item): item is MenuItemInput => item !== null);
 
       // Check if menu exists
       const existingId = await findMenuByHandle(client, menu.handle);
@@ -265,10 +361,21 @@ export async function applyMenus(
           const errorMsg = response.userErrors
             .map((e: any) => e.message)
             .join(", ");
-          stats.errors.push({ handle: menu.handle, error: errorMsg });
-          logger.error(`Menu update errors for ${menu.handle}:`, {
-            errors: response.userErrors,
-          });
+
+          // Special handling for customer account page errors
+          if (errorMsg.includes("customer_account_page not found")) {
+            const enhancedError = `${errorMsg}. Note: Customer account page links may require the New Customer Accounts to be enabled in the destination store (Settings → Customer accounts → New customer accounts).`;
+            stats.errors.push({ handle: menu.handle, error: enhancedError });
+            logger.error(`Menu update errors for ${menu.handle}:`, {
+              errors: response.userErrors,
+              note: "Customer account pages require New Customer Accounts to be enabled",
+            });
+          } else {
+            stats.errors.push({ handle: menu.handle, error: errorMsg });
+            logger.error(`Menu update errors for ${menu.handle}:`, {
+              errors: response.userErrors,
+            });
+          }
           continue;
         }
 

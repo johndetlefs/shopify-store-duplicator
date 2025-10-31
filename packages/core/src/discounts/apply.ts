@@ -310,6 +310,20 @@ async function createDiscount(
   destinationIndex: DestinationIndex
 ): Promise<Result<void>> {
   try {
+    // Validate BXGY discounts don't use "all" items (not supported by Shopify)
+    if (
+      (discount.type === "DiscountCodeBxgy" ||
+        discount.type === "DiscountAutomaticBxgy") &&
+      (discount.customerBuys.items.type === "all" ||
+        discount.customerGets.items.type === "all")
+    ) {
+      return err(
+        new Error(
+          `BXGY discounts do not support "all" items. Must specify products or collections for both customerBuys and customerGets.`
+        )
+      );
+    }
+
     let mutation: string;
     let variables: any;
 
@@ -513,9 +527,12 @@ function buildCodeBasicInput(
 ): any {
   if (discount.type !== "DiscountCodeBasic") return {};
 
+  // Use title as code if no codes provided
+  const code = discount.codes?.[0] || discount.title;
+
   return {
     title: discount.title,
-    codes: discount.codes,
+    code: code,
     startsAt: discount.startsAt,
     endsAt: discount.endsAt,
     customerGets: {
@@ -552,18 +569,39 @@ function buildCodeBxgyInput(
 ): any {
   if (discount.type !== "DiscountCodeBxgy") return {};
 
+  // Use title as code if no codes provided
+  const code = discount.codes?.[0] || discount.title;
+
+  // BXGY requires specific products/collections, not "all"
+  const customerBuysItems = buildDiscountItemsInput(
+    discount.customerBuys.items,
+    index,
+    true
+  );
+  const customerGetsItems = buildDiscountItemsInput(
+    discount.customerGets.items,
+    index,
+    true
+  );
+
+  if (!customerBuysItems || !customerGetsItems) {
+    logger.warn(
+      `BXGY discount "${discount.title}" uses "all" items which is not supported. Must specify products or collections.`
+    );
+  }
+
   return {
     title: discount.title,
-    codes: discount.codes,
+    code: code,
     startsAt: discount.startsAt,
     endsAt: discount.endsAt,
     customerBuys: {
-      items: buildDiscountItemsInput(discount.customerBuys.items, index),
+      items: customerBuysItems || { all: true }, // Fallback for error reporting
       value: buildBxgyValueInput(discount.customerBuys.value),
     },
     customerGets: {
       value: buildDiscountValueInput(discount.customerGets.value),
-      items: buildDiscountItemsInput(discount.customerGets.items, index),
+      items: customerGetsItems || { all: true }, // Fallback for error reporting
       ...(discount.customerGets.appliesOnSubscription === true
         ? {
             appliesOnOneTimePurchase:
@@ -579,7 +617,10 @@ function buildCodeBxgyInput(
     discount.recurringCycleLimit
       ? { recurringCycleLimit: discount.recurringCycleLimit }
       : {}),
-    usesPerOrderLimit: discount.usesPerOrderLimit,
+    // For CODE BXGY, usesPerOrderLimit is an Int, not a string
+    ...(discount.usesPerOrderLimit
+      ? { usesPerOrderLimit: discount.usesPerOrderLimit }
+      : {}),
     combinesWith: discount.combinesWith,
   };
 }
@@ -608,15 +649,15 @@ function buildCodeFreeShippingInput(
 
   return {
     title: discount.title,
-    code: discount.codes?.[0],
+    // Only include code if it exists and is not empty
+    ...(discount.codes?.[0] ? { code: discount.codes[0] } : {}),
     startsAt: discount.startsAt,
     endsAt: discount.endsAt,
     customerSelection: buildCustomerSelectionInput(discount.customerSelection),
     minimumRequirement: minimumRequirementInput,
     destination: buildShippingDestinationInput(discount.destination),
-    maximumShippingPrice: discount.maximumShippingPrice
-      ? { amount: discount.maximumShippingPrice }
-      : undefined,
+    // maximumShippingPrice expects a decimal string, not an object
+    maximumShippingPrice: discount.maximumShippingPrice || undefined,
     // Only include subscription fields if subscriptions are explicitly being used
     ...(discount.appliesOnSubscription === true
       ? {
@@ -675,17 +716,35 @@ function buildAutomaticBxgyInput(
 ): any {
   if (discount.type !== "DiscountAutomaticBxgy") return {};
 
+  // BXGY requires specific products/collections, not "all"
+  const customerBuysItems = buildDiscountItemsInput(
+    discount.customerBuys.items,
+    index,
+    true
+  );
+  const customerGetsItems = buildDiscountItemsInput(
+    discount.customerGets.items,
+    index,
+    true
+  );
+
+  if (!customerBuysItems || !customerGetsItems) {
+    logger.warn(
+      `BXGY discount "${discount.title}" uses "all" items which is not supported. Must specify products or collections.`
+    );
+  }
+
   return {
     title: discount.title,
     startsAt: discount.startsAt,
     endsAt: discount.endsAt,
     customerBuys: {
-      items: buildDiscountItemsInput(discount.customerBuys.items, index),
+      items: customerBuysItems || { all: true }, // Fallback for error reporting
       value: buildBxgyValueInput(discount.customerBuys.value),
     },
     customerGets: {
       value: buildDiscountValueInput(discount.customerGets.value),
-      items: buildDiscountItemsInput(discount.customerGets.items, index),
+      items: customerGetsItems || { all: true }, // Fallback for error reporting
       ...(discount.customerGets.appliesOnSubscription === true
         ? {
             appliesOnOneTimePurchase:
@@ -698,7 +757,10 @@ function buildAutomaticBxgyInput(
     discount.recurringCycleLimit
       ? { recurringCycleLimit: discount.recurringCycleLimit }
       : {}),
-    usesPerOrderLimit: discount.usesPerOrderLimit,
+    // usesPerOrderLimit must be a string (UnsignedInt64)
+    ...(discount.usesPerOrderLimit
+      ? { usesPerOrderLimit: String(discount.usesPerOrderLimit) }
+      : {}),
     combinesWith: discount.combinesWith,
   };
 }
@@ -720,9 +782,8 @@ function buildAutomaticFreeShippingInput(
       discount.minimumRequirement
     ),
     destination: buildShippingDestinationInput(discount.destination),
-    maximumShippingPrice: discount.maximumShippingPrice
-      ? { amount: discount.maximumShippingPrice }
-      : undefined,
+    // maximumShippingPrice expects a decimal string, not an object
+    maximumShippingPrice: discount.maximumShippingPrice || undefined,
     ...(discount.appliesOnSubscription === true
       ? {
           appliesOnOneTimePurchase: discount.appliesOnOneTimePurchase,
@@ -739,7 +800,8 @@ function buildAutomaticFreeShippingInput(
  */
 function buildDiscountValueInput(value: DiscountValue): any {
   if (value.type === "percentage") {
-    return { percentage: value.percentage / 100 }; // Shopify expects decimal (e.g., 0.15 for 15%)
+    // Dump already has decimal format (0.3 = 30%), use as-is
+    return { percentage: value.percentage };
   } else if (value.type === "fixedAmount") {
     return {
       discountAmount: {
@@ -760,12 +822,19 @@ function buildDiscountValueInput(value: DiscountValue): any {
 
 /**
  * Build discount items input (all, products, or collections)
+ * Note: For BXGY discounts, "all" is not supported - must specify products/collections
  */
 function buildDiscountItemsInput(
   items: DiscountItems,
-  index: DestinationIndex
+  index: DestinationIndex,
+  isBxgy: boolean = false
 ): any {
   if (items.type === "all") {
+    if (isBxgy) {
+      // BXGY doesn't support "all" - must use specific items
+      // Return undefined to signal caller that this is invalid
+      return null;
+    }
     return { all: true };
   } else if (items.type === "products") {
     const productIds = items.productHandles
@@ -782,8 +851,8 @@ function buildDiscountItemsInput(
 
     return {
       products: {
-        productIds,
-        productVariantIds: variantIds,
+        productsToAdd: productIds,
+        productVariantsToAdd: variantIds,
       },
     };
   } else if (items.type === "collections") {
@@ -792,11 +861,11 @@ function buildDiscountItemsInput(
       .filter(Boolean);
     return {
       collections: {
-        collectionIds,
+        collectionsToAdd: collectionIds,
       },
     };
   }
-  return { all: true };
+  return isBxgy ? null : { all: true };
 }
 
 /**

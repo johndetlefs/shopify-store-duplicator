@@ -1364,6 +1364,19 @@ export const RESOLVE_NODES_QUERY = `
 /**
  * Shop Policies
  */
+export const SHOP_INFO_QUERY = `
+  query {
+    shop {
+      id
+      myshopifyDomain
+      url
+      customerAccountsV2 {
+        url
+      }
+    }
+  }
+`;
+
 export const SHOP_POLICIES_QUERY = `
   query {
     shop {

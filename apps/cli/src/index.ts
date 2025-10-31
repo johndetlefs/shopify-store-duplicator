@@ -916,9 +916,15 @@ program
       logger.warn("Menu errors:", result.data.errors.slice(0, 10));
     }
 
-    if (result.data.failed > 0) {
-      logger.warn(`${result.data.failed} menus failed to apply`);
+    // Only fail if ALL menus failed or if nothing was processed successfully
+    const totalProcessed = result.data.created + result.data.updated;
+    if (result.data.failed > 0 && totalProcessed === 0) {
+      logger.error(`\n${result.data.failed} menus failed to apply`);
       process.exit(1);
+    } else if (result.data.failed > 0) {
+      logger.warn(
+        `\n${result.data.failed} menus failed to apply, but ${totalProcessed} succeeded`
+      );
     }
   });
 
@@ -1256,9 +1262,16 @@ program
       });
     }
 
-    if (result.data.failed > 0) {
+    // Only fail if ALL discounts failed or if nothing was processed successfully
+    const totalProcessed =
+      result.data.created + result.data.updated + result.data.skipped;
+    if (result.data.failed > 0 && totalProcessed === 0) {
       logger.error(`\n${result.data.failed} discounts failed to apply`);
       process.exit(1);
+    } else if (result.data.failed > 0) {
+      logger.warn(
+        `\n${result.data.failed} discounts failed to apply, but ${totalProcessed} succeeded`
+      );
     }
 
     logger.info("\n✓ Discounts apply complete");

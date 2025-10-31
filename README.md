@@ -46,7 +46,7 @@ cp .env.example .env
 npm run cli -- defs:dump -o source-defs.json          # Export schema
 npm run cli -- defs:apply -f source-defs.json         # Import schema
 npm run cli -- data:dump -o ./dumps                   # Export data
-npm run cli -- data:apply -i ./dumps                  # Import data (includes files, blogs, articles)
+npm run cli -- data:apply -i ./dumps                  # Import data (10-phase: files, products, collections, blogs, articles, pages, metaobjects, metafields)
 npm run cli -- menus:dump -o menus.json               # Export menus
 npm run cli -- menus:apply -f menus.json              # Import menus
 npm run cli -- redirects:dump -o redirects.json       # Export redirects
@@ -127,16 +127,20 @@ All references preserved as natural keys (handles, not GIDs).
 npm run cli -- data:apply -i ./dumps
 ```
 
-**7-phase workflow:**
+**10-phase workflow:**
 
 1. Builds destination index (handles → GIDs)
 2. **Uploads files and builds file index for relinking** (idempotent - updates alt text if changed, skips unchanged files)
-3. Creates metaobjects with remapped references and relinked files
-4. Creates blogs
-5. Creates articles (linked to blogs)
-6. Creates pages with full HTML content
-7. Applies metafields to all resources (products, variants, collections, pages, blogs, articles, shop)
-8. **Syncs sales channel publications** (idempotent - unpublishes from all, then publishes to matching source channels)
+3. **Creates products with variants** (so metaobjects can reference them)
+4. **Creates collections** (so metaobjects can reference them)
+5. **Creates blogs** (so articles can reference them)
+6. **Creates articles** (linked to blogs, so metaobjects can reference them)
+7. **Creates pages** with full HTML content (so metaobjects can reference them)
+8. **Rebuilds index** (captures all newly created resource GIDs)
+9. **Creates metaobjects** with remapped references and relinked files (can now reference all resource types)
+10. **Applies metafields** to all resources (products, variants, collections, pages, blogs, articles, shop, metaobjects)
+
+Plus: **Syncs sales channel publications** for products and collections (idempotent - unpublishes from all, then publishes to matching source channels)
 
 Result: Complete data migration with all references pointing to correct destination resources. **100% idempotent** - safe to re-run without creating duplicates.
 

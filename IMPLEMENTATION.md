@@ -241,7 +241,57 @@
      - Comprehensive error handling with per-discount stats
      - **Pattern**: Title-based matching, deterministic remapping
 
-   - **Complete BXGY Support**: Both `customerBuys` (what triggers) and `customerGets` (what they receive) now capture full product/collection targeting details by running complementary bulk queries and merging results.
+     - **Complete BXGY Support**: Both `customerBuys` (what triggers) and `customerGets` (what they receive) now capture full product/collection targeting details by running complementary bulk queries and merging results.
+
+1. **Markets** (`packages/core/src/markets/`) ✨ **COMPLETE**
+
+   - ✅ `types.ts` - Type definitions (70 lines): ✨ **NEW**
+
+     - `DumpedMarket` - Market configuration with natural key (handle)
+     - `DumpedMarketRegion` - Region/country with ISO country codes
+     - `DumpedMarketWebPresence` - Domain/subfolder/locale configuration
+     - `MarketsDump` - Complete markets export structure
+     - `MarketsApplyStats` - Apply operation statistics
+
+   - ✅ `dump.ts` - Export markets configuration (260 lines): ✨ **NEW**
+
+     - Queries all markets with pagination
+     - Extracts market settings (name, handle, enabled, primary)
+     - **Captures regions with 2-letter ISO country codes** (e.g., "AU", "GB", "US")
+     - Uses inline fragment `... on MarketRegionCountry { code }` in GraphQL
+     - Exports web presences (domains, subfolders, locales)
+     - Natural keys: market handle, region countryCode
+     - **File**: `markets.json`
+
+   - ✅ `apply.ts` - Import markets with idempotent operations (700 lines): ✨ **NEW**
+
+     - Queries existing markets in destination (by handle)
+     - **Creates markets**: Uses `conditions.regionsCondition.regions` with countryCode array
+     - **Updates markets**: Uses `conditions.conditionsToAdd.regionsCondition.regions` (additive)
+     - Creates/updates web presences (domains, subfolders, locales)
+     - **Primary market protection** - Cannot change primary market (Shopify restriction)
+     - **Region management** - Regions set via market conditions (no separate query needed)
+     - Comprehensive stats: markets created/updated/skipped/failed, regions configured, web presences
+     - **100% idempotent** - Safe to re-run without duplicates
+
+   - **GraphQL Integration**:
+
+     - `MARKETS_QUERY` - Bulk query with inline fragment for country codes
+     - `MARKET_CREATE` - With `conditions.regionsCondition.regions`
+     - `MARKET_UPDATE` - With `conditions.conditionsToAdd.regionsCondition.regions`
+     - `MARKET_WEB_PRESENCE_CREATE/UPDATE` - Domain configuration
+
+   - **Natural Keys**:
+
+     - Markets: `handle`
+     - Regions: 2-letter ISO `countryCode` (e.g., "AU", "GB")
+     - Web Presences: `domainHost` or "default"
+
+   - **CLI Commands**:
+     - `markets:dump -o markets.json` - Export markets
+     - `markets:apply -f markets.json` - Import markets (requires `write_markets` scope)
+
+1. **CLI Application** (`apps/cli/src/`)
 
 1. **Markets** (`packages/core/src/markets/`) ✨ **COMPLETE** 🆕
 
@@ -708,6 +758,9 @@ These are **nice-to-have** improvements, not required for production use:
 - ✅ Blogs/Articles dump/apply (100%)
 - ✅ Menus dump/apply (100%)
 - ✅ Redirects dump/apply (100%)
+- ✅ Policies dump/apply (100%)
+- ✅ Discounts dump/apply (100%)
+- ✅ Markets dump/apply (100%)
 - ✅ Diff commands (100%)
 - ✅ CLI commands (100%)
 - ✅ **Drop commands (20%)** - Files only; products/collections/metaobjects/pages/blogs pending
@@ -726,11 +779,14 @@ All specified features have been implemented and tested. The Shopify Store Dupli
 - ✅ Navigation menus with URL remapping
 - ✅ URL redirects
 - ✅ Shop policies (refund, privacy, terms, shipping, contact)
-- ✅ **Discounts (automatic + code-based: Basic, BXGY, Free Shipping)** ✨ **NEW**
+- ✅ **Discounts (automatic + code-based: Basic, BXGY, Free Shipping)** ✨
+- ✅ **Markets (regions, currencies, web presences)** ✨ **NEW**
 - ✅ Full validation via diff commands
 - ✅ **All operations are idempotent (safe to re-run without duplicates)** ✨
 
 **Latest Updates:**
+
+- **Markets (COMPLETE):** Multi-region selling configuration with regions (countries), currencies, and web presences (domains/subfolders/locales). Regions managed via market conditions using 2-letter ISO country codes. Primary market protection enforced. Web presences for custom domain/locale configuration. 100% idempotent.
 
 - **Discounts (COMPLETE):** Full discount migration with 10 split bulk queries to capture complete BXGY targeting. For BXGY discounts, runs 2 queries (one for `customerBuys`, one for `customerGets`), then merges by title. Automatically remaps all product/collection references for both Basic and BXGY discount types. No limitations!
 

@@ -91,6 +91,8 @@ cat test-defs.json | jq .
    - `read_files`, `write_files`
    - `read_navigation`, `write_navigation`
    - `read_online_store_pages`, `write_online_store_pages`
+   - `read_discounts`, `write_discounts`
+   - `read_markets`, `write_markets`
 7. Click **Save**
 8. Click **Install app**
 9. Copy the **Admin API access token** (starts with `shpat_`)

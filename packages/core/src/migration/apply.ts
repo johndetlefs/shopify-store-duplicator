@@ -7,15 +7,23 @@
  * - Upsert metaobjects and metafields to destination store
  * - Handle errors gracefully, continue on individual failures
  *
- * Order of operations:
+ * Order of operations (10 phases):
  * 1. Build destination index (handles → GIDs)
- * 2. Apply metaobjects (create entries with remapped references)
- * 3. Apply metafields to products, collections, pages
- * 4. Apply pages (create/update with remapped metafields)
+ * 2. Upload files & build file index for relinking
+ * 3. Apply products (with variants and publications) - before metaobjects
+ * 4. Apply collections (with publications) - before metaobjects
+ * 5. Apply blogs - before articles
+ * 6. Apply articles (with blog relationship) - before metaobjects
+ * 7. Apply pages (create/update with full HTML content) - before metaobjects
+ * 8. Rebuild index (capture newly created resources)
+ * 9. Apply metaobjects (with remapped refs and file relinking) - can now reference all resources
+ * 10. Apply metafields to all resources (products, variants, collections, pages, blogs, articles, shop, metaobjects)
  *
  * Idempotency:
  * - Uses metaobjectUpsert (creates if missing, updates if exists by handle)
  * - Uses metafieldsSet (upserts by namespace/key)
+ * - Files: matches by filename, updates alt text if changed, skips unchanged
+ * - Publications: unpublishes from all channels, then publishes to matching source channels
  * - Safe to re-run
  */
 
@@ -2510,10 +2518,13 @@ export async function applyArticles(
  * Order:
  * 1. Build destination index
  * 2. Apply files (upload and build file index for relinking)
- * 3. Apply metaobjects (with remapped refs including files)
- * 4. Apply blogs and articles
- * 5. Apply pages (create/update content)
- * 6. Apply metafields to products, collections, pages, blogs, articles, shop
+ * 3. Apply products (with variants and publications) - before metaobjects
+ * 4. Apply collections (with publications) - before metaobjects
+ * 5. Apply blogs - before articles
+ * 6. Apply articles (with blog relationship) - before metaobjects
+ * 7. Apply pages (create/update content) - before metaobjects
+ * 8. Apply metaobjects (with remapped refs including files) - can now reference all resources
+ * 9. Apply metafields to products, variants, collections, pages, blogs, articles, shop, metaobjects
  */
 export interface ApplyOptions {
   productsOnly?: boolean;
@@ -2558,7 +2569,7 @@ export async function applyAllData(
 
   // Step 1: Build destination index
   logger.info("Step 1: Building destination index...");
-  const index = await buildDestinationIndex(client);
+  let index = await buildDestinationIndex(client);
 
   // Step 2: Apply files (BEFORE metaobjects so we can relink file references)
   let fileIndex: FileIndex = {
@@ -2578,10 +2589,117 @@ export async function applyAllData(
     }
   }
 
-  // Step 3: Apply metaobjects (with file relinking)
+  // Step 3: Apply products (before metaobjects so metaobjects can reference them)
+  let productsResult: Result<ApplyStats, Error> | undefined;
+  if (applyAll || options.productsOnly) {
+    logger.info("Step 3: Applying products...");
+    const productsFile = path.join(inputDir, "products.jsonl");
+    productsResult = await applyProducts(
+      client,
+      productsFile,
+      index,
+      fileIndex
+    );
+    if (!productsResult.ok) {
+      logger.warn("Products apply failed, continuing...");
+    }
+
+    // Rebuild index after creating products to ensure new products are mapped
+    logger.info("Rebuilding index after product creation...");
+    index = await buildDestinationIndex(client);
+  }
+
+  // Step 4: Apply collections (before metaobjects so metaobjects can reference them)
+  let collectionsResult: Result<ApplyStats, Error> | undefined;
+  if (applyAll || options.collectionsOnly) {
+    logger.info("Step 4: Applying collections...");
+    const collectionsFile = path.join(inputDir, "collections.jsonl");
+    collectionsResult = await applyCollections(client, collectionsFile, index);
+    if (!collectionsResult.ok) {
+      logger.warn("Collections apply failed, continuing...");
+    }
+
+    // Rebuild index after creating collections to ensure new collections are mapped
+    logger.info("Rebuilding index after collection creation...");
+    index = await buildDestinationIndex(client);
+  }
+
+  // Step 5: Apply blogs (before articles and metaobjects)
+  let blogsResult: Result<ApplyStats, Error>;
+  if (applyAll || options.blogsOnly) {
+    logger.info("Step 5: Applying blogs...");
+    const blogsFile = path.join(inputDir, "blogs.jsonl");
+    blogsResult = await applyBlogs(client, blogsFile, index);
+    if (!blogsResult.ok) {
+      logger.warn("Blogs apply failed, continuing...");
+    }
+
+    // Rebuild index after creating blogs to ensure new blogs are mapped
+    logger.info("Rebuilding index after blog creation...");
+    index = await buildDestinationIndex(client);
+  } else {
+    blogsResult = ok({
+      total: 0,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      errors: [],
+    });
+  }
+
+  // Step 6: Apply articles (before metaobjects so metaobjects can reference them)
+  let articlesResult: Result<ApplyStats, Error>;
+  if (applyAll || options.articlesOnly) {
+    logger.info("Step 6: Applying articles...");
+    const articlesFile = path.join(inputDir, "articles.jsonl");
+    articlesResult = await applyArticles(client, articlesFile, index);
+    if (!articlesResult.ok) {
+      logger.warn("Articles apply failed, continuing...");
+    }
+
+    // Rebuild index after creating articles to ensure new articles are mapped
+    logger.info("Rebuilding index after article creation...");
+    index = await buildDestinationIndex(client);
+  } else {
+    articlesResult = ok({
+      total: 0,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      errors: [],
+    });
+  }
+
+  // Step 7: Apply pages (before metaobjects so metaobjects can reference them)
+  let pagesResult: Result<ApplyStats, Error>;
+  if (applyAll || options.pagesOnly) {
+    logger.info("Step 7: Applying pages...");
+    const pagesFile = path.join(inputDir, "pages.jsonl");
+    pagesResult = await applyPages(client, pagesFile, index);
+    if (!pagesResult.ok) {
+      logger.warn("Pages apply failed, continuing...");
+    }
+
+    // Rebuild index after creating pages to ensure new pages are mapped
+    logger.info("Rebuilding index after page creation...");
+    index = await buildDestinationIndex(client);
+  } else {
+    pagesResult = ok({
+      total: 0,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      errors: [],
+    });
+  }
+
+  // Step 8: Apply metaobjects (AFTER all resources so metaobjects can reference them)
   let metaobjectsResult: Result<ApplyStats, Error>;
   if (applyAll || options.metaobjectsOnly) {
-    logger.info("Step 3: Applying metaobjects...");
+    logger.info("Step 8: Applying metaobjects...");
     metaobjectsResult = await applyMetaobjects(
       client,
       inputDir,
@@ -2602,124 +2720,9 @@ export async function applyAllData(
     });
   }
 
-  // Rebuild index after creating metaobjects to ensure new ones are mapped
-  logger.info("Rebuilding index after metaobject creation...");
-  let updatedIndex = await buildDestinationIndex(client);
+  const finalIndex = index;
 
-  // Step 4: Apply products (before metafields)
-  let productsResult: Result<ApplyStats, Error> | undefined;
-  if (applyAll || options.productsOnly) {
-    logger.info("Step 4: Applying products...");
-    const productsFile = path.join(inputDir, "products.jsonl");
-    productsResult = await applyProducts(
-      client,
-      productsFile,
-      updatedIndex,
-      fileIndex
-    );
-    if (!productsResult.ok) {
-      logger.warn("Products apply failed, continuing...");
-    }
-
-    // Rebuild index after creating products to ensure new products are mapped
-    logger.info("Rebuilding index after product creation...");
-    updatedIndex = await buildDestinationIndex(client);
-  }
-
-  // Step 5: Apply collections (before metafields)
-  let collectionsResult: Result<ApplyStats, Error> | undefined;
-  if (applyAll || options.collectionsOnly) {
-    logger.info("Step 5: Applying collections...");
-    const collectionsFile = path.join(inputDir, "collections.jsonl");
-    collectionsResult = await applyCollections(
-      client,
-      collectionsFile,
-      updatedIndex
-    );
-    if (!collectionsResult.ok) {
-      logger.warn("Collections apply failed, continuing...");
-    }
-
-    // Rebuild index after creating collections to ensure new collections are mapped
-    logger.info("Rebuilding index after collection creation...");
-    updatedIndex = await buildDestinationIndex(client);
-  }
-
-  // Step 6: Apply blogs (before articles)
-  let blogsResult: Result<ApplyStats, Error>;
-  if (applyAll || options.blogsOnly) {
-    logger.info("Step 6: Applying blogs...");
-    const blogsFile = path.join(inputDir, "blogs.jsonl");
-    blogsResult = await applyBlogs(client, blogsFile, updatedIndex);
-    if (!blogsResult.ok) {
-      logger.warn("Blogs apply failed, continuing...");
-    }
-
-    // Rebuild index after creating blogs to ensure new blogs are mapped
-    logger.info("Rebuilding index after blog creation...");
-    updatedIndex = await buildDestinationIndex(client);
-  } else {
-    blogsResult = ok({
-      total: 0,
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      failed: 0,
-      errors: [],
-    });
-  }
-
-  // Step 7: Apply articles (after blogs)
-  let articlesResult: Result<ApplyStats, Error>;
-  if (applyAll || options.articlesOnly) {
-    logger.info("Step 7: Applying articles...");
-    const articlesFile = path.join(inputDir, "articles.jsonl");
-    articlesResult = await applyArticles(client, articlesFile, updatedIndex);
-    if (!articlesResult.ok) {
-      logger.warn("Articles apply failed, continuing...");
-    }
-
-    // Rebuild index after creating articles to ensure new articles are mapped
-    logger.info("Rebuilding index after article creation...");
-    updatedIndex = await buildDestinationIndex(client);
-  } else {
-    articlesResult = ok({
-      total: 0,
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      failed: 0,
-      errors: [],
-    });
-  }
-
-  // Step 8: Apply pages (create/update content before metafields)
-  let pagesResult: Result<ApplyStats, Error>;
-  if (applyAll || options.pagesOnly) {
-    logger.info("Step 8: Applying pages...");
-    const pagesFile = path.join(inputDir, "pages.jsonl");
-    pagesResult = await applyPages(client, pagesFile, updatedIndex);
-    if (!pagesResult.ok) {
-      logger.warn("Pages apply failed, continuing...");
-    }
-
-    // Rebuild index after creating pages to ensure new pages are mapped
-    logger.info("Rebuilding index after page creation...");
-    updatedIndex = await buildDestinationIndex(client);
-  } else {
-    pagesResult = ok({
-      total: 0,
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      failed: 0,
-      errors: [],
-    });
-  }
-
-  const finalIndex = updatedIndex;
-
-  // Step 9: Apply metafields (to all resources) - only if doing full apply or specific metafield flags
+  // Step 9: Apply metafields (to all resources)
   const aggregateMetafields: ApplyStats = {
     total: 0,
     created: 0,

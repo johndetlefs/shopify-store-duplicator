@@ -6,17 +6,30 @@
   - Products / Collections / Pages / Blogs → `handle`
   - Articles → `{blogHandle}:{articleHandle}` (composite key)
   - Variants → `{productHandle}:{sku}` (fallback to `{productHandle}:pos{position}` if SKU missing)
-- ✅ **Strict ordering** (7-phase apply workflow):
+  - Markets → `handle`
+  - Market Regions → 2-letter ISO `countryCode` (e.g., "AU", "GB", "US")
+- ✅ **Strict ordering** - **Complete Migration Workflow**:
+  1. **Definitions** (schema) - `defs:dump` → `defs:apply` (metaobject definitions, metafield definitions)
+  2. **Data** (content) - `data:dump` → `data:apply` (10-phase workflow - see below)
+  3. **Menus** - `menus:dump` → `menus:apply` (navigation with URL remapping)
+  4. **Redirects** - `redirects:dump` → `redirects:apply` (SEO preservation)
+  5. **Policies** - `policies:dump` → `policies:apply` (refund, privacy, terms, shipping, contact)
+  6. **Discounts** - `discounts:dump` → `discounts:apply` (automatic + code-based)
+  7. **Markets** - `markets:dump` → `markets:apply` (regions, currencies, web presences)
+- ✅ **Data Apply 10-Phase Workflow** (internal phases within `data:apply`):
   1. Build destination index (handles → GIDs)
   2. Upload files & build file index (URL/GID → destination GID) - **IDEMPOTENT: queries existing files, updates if alt changed, skips unchanged**
-  3. Apply metaobjects with file reference relinking
-  4. Apply blogs (handle-based)
-  5. Apply articles (composite key with blog lookup)
-  6. Apply pages (with full HTML content)
-  7. Apply metafields to all resources (products, variants, collections, pages, blogs, articles, shop)
+  3. Apply products (with variants and publications) - so metaobjects can reference them
+  4. Apply collections (with publications) - so metaobjects can reference them
+  5. Apply blogs (handle-based) - so articles can reference them
+  6. Apply articles (composite key with blog lookup) - so metaobjects can reference them
+  7. Apply pages (with full HTML content) - so metaobjects can reference them
+  8. Rebuild index (capture newly created resources)
+  9. Apply metaobjects with file reference relinking (can now reference all resource types)
+  10. Apply metafields to all resources (products, variants, collections, pages, blogs, articles, shop, metaobjects)
 - ✅ **Rate limits & resilience:** Exponential backoff on 429/430; chunked writes (25-50 per batch); log and continue on per-record errors.
 - ✅ **Security:** Tokens from `.env`; automatic redaction in logs; URLs with tokens redacted.
-- ✅ **Observability:** Structured logs with configurable levels; detailed stats for created/updated/skipped/failed.TypeScript, Node)
+- ✅ **Observability:** Structured logs with configurable levels; detailed stats for created/updated/skipped/failed.
 
 **Status:** ✅ **100% COMPLETE - PRODUCTION READY**
 
@@ -25,13 +38,15 @@
 ## Scope (All Features Implemented ✅)
 
 - ✅ **Definitions (schema):** metaobject definitions + field definitions; metafield definitions (by owner type / namespace / key).
-- ✅ **Data (content):** metaobject _entries_, metafields on core resources (products, variants, collections, pages, articles, blogs, shop), menus, redirects, policies.
+- ✅ **Data (content):** metaobject _entries_, metafields on core resources (products, variants, collections, pages, articles, blogs, shop), menus, redirects, policies, discounts, markets.
 - ✅ **CMS content:** Pages, blogs, articles with full HTML content and metafields.
 - ✅ **Files:** Upload files to destination, build file index, automatically relink file references in metaobjects/metafields. **100% idempotent** - matches by filename, updates alt text if changed, skips unchanged files.
 - ✅ **Publications (Sales Channels):** Product and collection channel visibility (Online Store, Shop, POS, Inbox, custom channels). **100% idempotent** - unpublishes from all channels, then publishes only to matching source channels.
 - ✅ **Shop policies:** Refund, privacy, terms of service, shipping, contact information.
+- ✅ **Discounts:** Automatic and code-based discounts (Basic, BXGY, Free Shipping) with product/collection reference remapping.
+- ✅ **Markets:** Multi-region selling configuration with regions (countries), currencies, and web presences (domains/subfolders/locales).
 - ✅ **Validation:** Diff commands for definitions and data to verify completeness.
-- **Non-goals:** orders, discounts, gift cards, analytics, customer data, theme code.
+- **Non-goals:** orders, gift cards, analytics, customer data, theme code.
 
 Uses **Shopify Admin GraphQL** with **Bulk Operations** for efficient large-scale reads/writes. Bulk queries return JSONL; parsed robustly with streaming for memory efficiency.: Shopify Store Duplicator (TypeScript, Node)
 
@@ -67,6 +82,8 @@ Use **Shopify Admin GraphQL** with **Bulk Operations** for large reads/writes wh
   /src/menus/       # ✅ Dump/apply navigation menus with URL remapping
   /src/redirects/   # ✅ Dump/apply URL redirects
   /src/policies/    # ✅ Dump/apply shop policies
+  /src/discounts/   # ✅ Dump/apply discounts (automatic + code-based)
+  /src/markets/     # ✅ Dump/apply markets (regions, currencies, web presences)
   /src/map/         # ✅ Natural key → GID mapping with destination indexing
   /src/graphql/     # ✅ Complete GraphQL queries/mutations for all operations
   /src/utils/       # ✅ Retry, chunking, logger, redaction, types
@@ -89,7 +106,7 @@ Use **Shopify Admin GraphQL** with **Bulk Operations** for large reads/writes wh
 - `data:apply` → Import all data with automatic reference remapping, file relinking, and publication syncing (7-phase workflow)
 - `data:diff` → Compare source dump vs destination, report missing resources
 
-### Menus, Redirects & Policies
+### Menus, Redirects, Policies & Discounts
 
 - `menus:dump` → Export navigation menus
 - `menus:apply` → Import menus with automatic URL remapping
@@ -97,11 +114,10 @@ Use **Shopify Admin GraphQL** with **Bulk Operations** for large reads/writes wh
 - `redirects:apply` → Import redirects (idempotent)
 - `policies:dump` → Export shop policies (refund, privacy, terms, shipping, contact)
 - `policies:apply` → Import shop policies (idempotent)
-
-### Discounts
-
 - `discounts:dump` → Export automatic and code-based discounts
 - `discounts:apply` → Import discounts with product/collection reference remapping
+- `markets:dump` → Export markets (regions, currencies, web presences)
+- `markets:apply` → Import markets with region registration (requires write_markets scope)
 
 ### Files & Publications (Integrated into data:apply)
 
@@ -133,6 +149,8 @@ Use **Shopify Admin GraphQL** with **Bulk Operations** for large reads/writes wh
 - ✅ **Menus:** 3-level hierarchical structure with URL remapping
 - ✅ **Redirects:** Individual creation with throttling (no bulk mutation available)
 - ✅ **Shop metafields:** Query shop GID directly, apply with standard metafieldsSet
+- ✅ **Discounts:** Automatic and code-based discounts (Basic, BXGY, Free Shipping) with product/collection reference remapping
+- ✅ **Markets:** marketCreate/marketUpdate with conditions.regionsCondition for region management, web presences for domain configuration
 
 ## Data modeling & mapping rules (All Implemented ✅)
 
@@ -204,6 +222,7 @@ Use **Shopify Admin GraphQL** with **Bulk Operations** for large reads/writes wh
 - ✅ URL redirects
 - ✅ Shop policies (refund, privacy, terms, shipping, contact)
 - ✅ Discounts (automatic + code-based: Basic, BXGY, Free Shipping)
+- ✅ Markets (regions, currencies, web presences)
 - ✅ Validation tools (defs:diff, data:diff)
 - ✅ Complete CLI with all commands
 - ✅ Comprehensive error handling and stats
@@ -212,21 +231,24 @@ Use **Shopify Admin GraphQL** with **Bulk Operations** for large reads/writes wh
 ### Key Files:
 
 - `packages/core/src/migration/dump.ts` - 870+ lines, all dump operations
-- `packages/core/src/migration/apply.ts` - 1,700+ lines, complete 7-phase apply workflow
+- `packages/core/src/migration/apply.ts` - 1,700+ lines, complete 10-phase apply workflow
 - `packages/core/src/map/ids.ts` - Complete destination indexing for all resource types
 - `packages/core/src/files/relink.ts` - 190 lines, automatic file reference relinking
 - `packages/core/src/graphql/queries.ts` - 1,100+ lines, all GraphQL operations
 - `apps/cli/src/index.ts` - 900+ lines, complete CLI implementation
 
-### Migration Workflow (7 Phases):
+### Migration Workflow (10 Phases within data:apply):
 
 1. **Build Index** - Map all destination handles → GIDs
 2. **Upload Files** - Create file index (URL/GID → destination GID)
-3. **Apply Metaobjects** - With file reference relinking
-4. **Apply Blogs** - Handle-based creation/update
-5. **Apply Articles** - With blog relationship lookup
-6. **Apply Pages** - Full HTML content migration
-7. **Apply Metafields** - To all resources (products, variants, collections, pages, blogs, articles, shop)
+3. **Apply Products** - With variants and publications (before metaobjects)
+4. **Apply Collections** - With publications (before metaobjects)
+5. **Apply Blogs** - Handle-based creation/update (before articles)
+6. **Apply Articles** - With blog relationship lookup (before metaobjects)
+7. **Apply Pages** - Full HTML content migration (before metaobjects)
+8. **Rebuild Index** - Capture newly created resources
+9. **Apply Metaobjects** - With file reference relinking (can now reference all resources)
+10. **Apply Metafields** - To all resources (products, variants, collections, pages, blogs, articles, shop, metaobjects)
 
 After each creation phase, index is rebuilt to ensure new resources are available for subsequent references.
 

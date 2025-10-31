@@ -63,6 +63,7 @@ import {
 import { chunkArray } from "../utils/chunk.js";
 import { logger } from "../utils/logger.js";
 import { type Result, ok, err } from "../utils/types.js";
+import { createProgressBar } from "../utils/progress.js";
 
 // ============================================================================
 // Types (matching dump.ts output)
@@ -1349,9 +1350,15 @@ export async function applyProducts(
     productId: string;
   }> = [];
 
+  // Create progress bar for product processing
+  const progressBar = createProgressBar(lines.length, {
+    format: "Products :bar :percent (:current/:total) :eta",
+  });
+
   // Phase 1: Create/update all products (without variants)
   for (const line of lines) {
     stats.total++;
+    progressBar.tick();
 
     try {
       const product = JSON.parse(line) as DumpedProduct;
@@ -1629,6 +1636,9 @@ export async function applyProducts(
     }
   }
 
+  // Complete the progress bar
+  progressBar.complete();
+
   logger.info(
     `✓ Applied ${stats.total} products: ${stats.created} created, ${stats.updated} updated, ${stats.failed} failed`
   );
@@ -1650,7 +1660,18 @@ export async function applyProducts(
     logger.info(
       `Processing variants for ${productsNeedingVariants.length} products...`
     );
+
+    // Create progress bar for variant processing
+    const variantProgressBar = createProgressBar(
+      productsNeedingVariants.length,
+      {
+        format: "Variants :bar :percent (:current/:total) :eta",
+      }
+    );
+
     for (const { product, productId } of productsNeedingVariants) {
+      variantProgressBar.tick();
+
       try {
         const variantsToUpdate: any[] = [];
         const variantsToCreate: any[] = [];
@@ -1795,6 +1816,9 @@ export async function applyProducts(
         });
       }
     }
+
+    // Complete the variant progress bar
+    variantProgressBar.complete();
 
     logger.info(
       `✓ Processed variants for ${productsNeedingVariants.length} products`

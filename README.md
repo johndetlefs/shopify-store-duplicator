@@ -15,6 +15,7 @@ Migrate **all custom data** from a source Shopify store to a destination store:
 - ✅ URL redirects (SEO preservation)
 - ✅ Shop policies (refund, privacy, terms, shipping, contact)
 - ✅ Discounts (code-based & automatic: Basic, BXGY, Free Shipping)
+- ✅ Markets (regions, currencies, web presences)
 - ✅ Complete validation tools
 
 ## Why This Tool?

@@ -8,6 +8,7 @@ export * from "./utils/retry.js";
 export * from "./utils/chunk.js";
 export * from "./utils/redact.js";
 export * from "./utils/types.js";
+export * from "./utils/progress.js";
 
 // GraphQL
 export * from "./graphql/client.js";

@@ -243,6 +243,43 @@
 
    - **Complete BXGY Support**: Both `customerBuys` (what triggers) and `customerGets` (what they receive) now capture full product/collection targeting details by running complementary bulk queries and merging results.
 
+1. **Markets** (`packages/core/src/markets/`) ✨ **COMPLETE** 🆕
+
+   - ✅ `types.ts` - Type definitions for markets, regions, and web presences: ✨ **NEW**
+
+     - `DumpedMarket` - Market configuration with natural key (handle)
+     - `DumpedMarketRegion` - Region/country with currency settings
+     - `DumpedMarketWebPresence` - Domain/subfolder configuration with locales
+     - `MarketsDump` - Complete markets export structure
+     - `MarketsApplyStats` - Comprehensive statistics for apply operations
+
+   - ✅ `dump.ts` - Export all markets configuration (260+ lines): ✨ **NEW**
+
+     - Queries all markets with pagination (`MARKETS_QUERY`)
+     - Extracts market settings (name, handle, enabled, primary status)
+     - Captures regions with country codes (ISO 3166-1 alpha-2) and currencies
+     - Exports web presences (domains, subfolders, locales)
+     - Includes price list associations
+     - Natural keys: market handle, region countryCode, web presence domain
+     - **Files**: `markets.json` with markets array
+
+   - ✅ `apply.ts` - Import markets with full configuration (700+ lines): ✨ **NEW**
+
+     - Queries existing markets in destination (by handle)
+     - Queries available market regions (countries)
+     - Creates or updates markets (name, enabled status)
+     - Registers regions to markets (additive, with chunking)
+     - Creates/updates web presences (domains, subfolders, locales)
+     - **Primary market protection** - Cannot change primary market status (Shopify restriction)
+     - **Domain warning** - Custom domains must be configured manually (DNS required)
+     - Comprehensive stats tracking (markets, regions, web presences)
+     - Idempotent: Updates existing by handle, creates if missing
+
+   - **Natural Keys**:
+     - Markets: `handle`
+     - Regions: `countryCode` (extracted from GID)
+     - Web Presences: `domainHost` or "default"
+
 1. **CLI Application** (`apps/cli/src/`)
 
 - ✅ `index.ts` - Commander-based CLI with:
@@ -267,6 +304,8 @@
   - `policies:apply` - Apply shop policies (refund, privacy, terms, shipping, contact)
   - `discounts:dump` - Dump all discounts (automatic + code-based) to JSON ✨ **NEW**
   - `discounts:apply` - Apply discounts with product/collection remapping ✨ **NEW**
+  - `markets:dump` - Dump markets (regions, currencies, web presences) to JSON ✨ **NEW** 🆕
+  - `markets:apply` - Apply markets with region registration and web presence configuration ✨ **NEW** 🆕
   - Environment variable support (.env)
   - Comprehensive stats display (including file upload counts)
 

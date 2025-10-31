@@ -29,6 +29,8 @@ npm run cli -- policies:dump -o policies.json && \
 npm run cli -- policies:apply -f policies.json && \
 npm run cli -- discounts:dump -o discounts.json && \
 npm run cli -- discounts:apply -f discounts.json && \
+npm run cli -- markets:dump -o markets.json && \
+npm run cli -- markets:apply -f markets.json && \
 echo "✅ Migration complete!"
 ````
 
@@ -97,6 +99,13 @@ npm run cli -- discounts:dump -o discounts.json # Export (automatic + code-based
 npm run cli -- discounts:apply -f discounts.json # Import (with product/collection remapping)
 ```
 
+### Markets
+
+```bash
+npm run cli -- markets:dump -o markets.json     # Export (regions, currencies, web presences)
+npm run cli -- markets:apply -f markets.json    # Import (requires write_markets scope)
+```
+
 ### Data Cleanup (Destructive)
 
 ```bash
@@ -144,7 +153,8 @@ npm run cli -- defs:apply -f defs.json --dry-run --verbose
 ✅ Navigation menus (with URL remapping)  
 ✅ URL redirects  
 ✅ Shop policies (refund, privacy, terms, shipping, contact)  
-✅ Discounts (automatic + code-based: Basic, BXGY, Free Shipping)
+✅ Discounts (automatic + code-based: Basic, BXGY, Free Shipping)  
+✅ Markets (regions, currencies, web presences)
 
 **All operations are idempotent** - safe to re-run without creating duplicates.
 
@@ -166,7 +176,8 @@ After `data:dump -o ./dumps`:
 ├── menus.json                       # Navigation menus
 ├── redirects.json                   # URL redirects
 ├── policies.json                    # Shop policies
-└── discounts.json                   # Discounts (automatic + code)
+├── discounts.json                   # Discounts (automatic + code)
+└── markets.json                     # Markets (regions, currencies, web presences)
 ```
 
 Each `.jsonl` file contains one JSON object per line (newline-delimited JSON).
@@ -331,6 +342,7 @@ npm run cli -- menus:dump -o prod-menus.json
 npm run cli -- redirects:dump -o prod-redirects.json
 npm run cli -- policies:dump -o prod-policies.json
 npm run cli -- discounts:dump -o prod-discounts.json
+npm run cli -- markets:dump -o prod-markets.json
 
 # 3. Import during maintenance window
 npm run cli -- defs:apply -f prod-defs.json
@@ -339,6 +351,7 @@ npm run cli -- menus:apply -f prod-menus.json
 npm run cli -- redirects:apply -f prod-redirects.json
 npm run cli -- policies:apply -f prod-policies.json
 npm run cli -- discounts:apply -f prod-discounts.json
+npm run cli -- markets:apply -f prod-markets.json
 
 # 4. Validate everything
 npm run cli -- defs:diff -f prod-defs.json
@@ -517,6 +530,7 @@ read_files, write_files
 read_navigation, write_navigation
 read_online_store_pages, write_online_store_pages
 read_discounts, write_discounts
+read_markets, write_markets
 ```
 
 ## Security Checklist

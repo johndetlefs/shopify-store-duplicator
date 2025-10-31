@@ -55,6 +55,8 @@ npm run cli -- policies:dump -o policies.json         # Export shop policies
 npm run cli -- policies:apply -f policies.json        # Import shop policies
 npm run cli -- discounts:dump -o discounts.json       # Export discounts
 npm run cli -- discounts:apply -f discounts.json      # Import discounts
+npm run cli -- markets:dump -o markets.json           # Export markets (regions, currencies)
+npm run cli -- markets:apply -f markets.json          # Import markets
 # OR for bulk imports (faster): --csv flag + manual import via Shopify Admin
 
 # 4. Validate
@@ -287,6 +289,9 @@ npm run cli -- policies:apply -f <file>   # Import shop policies
 
 npm run cli -- discounts:dump -o <file>   # Export discounts (automatic + code-based)
 npm run cli -- discounts:apply -f <file>  # Import discounts (with product/collection remapping)
+
+npm run cli -- markets:dump -o <file>     # Export markets (regions, currencies, web presences)
+npm run cli -- markets:apply -f <file>    # Import markets (requires write_markets scope)
 ```
 
 **CSV Import Option:**  

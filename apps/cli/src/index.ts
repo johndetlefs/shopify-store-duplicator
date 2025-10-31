@@ -16,6 +16,7 @@
  * - redirects:dump/apply - Handle redirects
  * - policies:dump/apply - Handle shop policies
  * - discounts:dump/apply - Handle discounts (automatic and code-based)
+ * - markets:dump/apply - Handle markets (regions, currencies, web presences)
  */
 
 import { Command } from "commander";
@@ -50,6 +51,8 @@ import {
   applyPolicies,
   dumpDiscounts,
   applyDiscounts,
+  dumpMarkets,
+  applyMarkets,
   logger,
   type GraphQLClientConfig,
 } from "@shopify-duplicator/core";
@@ -1626,6 +1629,133 @@ program
 
       process.exit(1);
     }
+  });
+
+/**
+ * MARKETS COMMANDS
+ */
+
+program
+  .command("markets:dump")
+  .description("Dump markets configuration from source store")
+  .option("-o, --output <file>", "Output file", "./dumps/markets.json")
+  .action(async (options) => {
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.srcShop || !globalOpts.srcToken) {
+      logger.error(
+        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.srcShop,
+      accessToken: globalOpts.srcToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    const outputPath = resolveWorkspacePath(options.output);
+
+    logger.info(`Dumping markets to ${outputPath}`);
+    logger.info(
+      "Note: Markets feature requires read_markets scope and may be plan-specific"
+    );
+
+    const result = await dumpMarkets(client, outputPath);
+
+    if (!result.ok) {
+      logger.error("Markets dump failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    logger.info("✓ Markets dump complete");
+  });
+
+program
+  .command("markets:apply")
+  .description("Apply markets configuration to destination store")
+  .option("-f, --file <file>", "Input file", "./dumps/markets.json")
+  .action(async (options) => {
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.dstShop || !globalOpts.dstToken) {
+      logger.error(
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.dstShop,
+      accessToken: globalOpts.dstToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    const filePath = resolveWorkspacePath(options.file);
+
+    if (globalOpts.dryRun) {
+      logger.info("[DRY RUN] Would apply markets from:", { filePath });
+      return;
+    }
+
+    logger.info(`Applying markets from ${filePath}`);
+    logger.info(
+      "Note: Markets feature requires write_markets scope and may be plan-specific"
+    );
+    logger.info(
+      "⚠️  Custom domains must be configured manually in Shopify Admin"
+    );
+    logger.info("⚠️  Primary market status cannot be changed via API");
+
+    const result = await applyMarkets(client, filePath);
+
+    if (!result.ok) {
+      logger.error("Markets apply failed", { error: result.error.message });
+      process.exit(1);
+    }
+
+    // Format and display stats table
+    console.log(
+      formatStatsTable("Markets Apply Results", {
+        created: result.data.marketsCreated,
+        updated: result.data.marketsUpdated,
+        skipped: result.data.marketsSkipped,
+        failed: result.data.marketsFailed,
+      })
+    );
+
+    console.log(
+      formatStatsTable("Regions", {
+        created: result.data.regionsRegistered,
+        deleted: result.data.regionsRemoved,
+      })
+    );
+
+    console.log(
+      formatStatsTable("Web Presences", {
+        created: result.data.webPresencesCreated,
+        updated: result.data.webPresencesUpdated,
+        failed: result.data.webPresencesFailed,
+      })
+    );
+
+    if (result.data.errors.length > 0) {
+      logger.warn("\nMarket errors:");
+      result.data.errors.forEach((error) => {
+        logger.warn(`  - ${error.market}: ${error.error}`);
+      });
+    }
+
+    logger.info("\n✓ Markets apply complete");
   });
 
 // Parse and execute

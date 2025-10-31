@@ -2288,3 +2288,289 @@ export const DISCOUNT_AUTOMATIC_FREE_SHIPPING_UPDATE = `
     }
   }
 `;
+
+/**
+ * Markets
+ */
+
+/**
+ * Markets - Query all markets with regions and web presences
+ */
+export const MARKETS_QUERY = `
+  query markets($first: Int!, $after: String) {
+    markets(first: $first, after: $after) {
+      edges {
+        node {
+          id
+          name
+          handle
+          enabled
+          primary
+          priceList {
+            id
+            name
+            currency
+          }
+          regions(first: 250) {
+            edges {
+              node {
+                id
+                name
+                ... on MarketRegionCountry {
+                  code
+                }
+              }
+            }
+          }
+          webPresences(first: 50) {
+            edges {
+              node {
+                id
+                domain {
+                  id
+                  host
+                }
+                subfolderSuffix
+                alternateLocales {
+                  locale
+                }
+                defaultLocale {
+                  locale
+                }
+              }
+            }
+          }
+        }
+        cursor
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`;
+
+/**
+ * Markets - Query single market by ID
+ */
+export const MARKET_QUERY = `
+  query market($id: ID!) {
+    market(id: $id) {
+      id
+      name
+      handle
+      enabled
+      primary
+      priceList {
+        id
+        name
+        currency
+      }
+      regions(first: 250) {
+        edges {
+          node {
+            id
+            name
+            ... on MarketRegionCountry {
+              code
+            }
+          }
+        }
+      }
+      webPresences(first: 50) {
+        edges {
+          node {
+            id
+            domain {
+              id
+              host
+            }
+            subfolderSuffix
+            alternateLocales {
+              locale
+            }
+            defaultLocale {
+              locale
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * Market - Create
+ */
+export const MARKET_CREATE = `
+  mutation marketCreate($input: MarketCreateInput!) {
+    marketCreate(input: $input) {
+      market {
+        id
+        name
+        handle
+        enabled
+        primary
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Market - Update
+ */
+export const MARKET_UPDATE = `
+  mutation marketUpdate($id: ID!, $input: MarketUpdateInput!) {
+    marketUpdate(id: $id, input: $input) {
+      market {
+        id
+        name
+        handle
+        enabled
+        primary
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Market - Delete
+ */
+export const MARKET_DELETE = `
+  mutation marketDelete($id: ID!) {
+    marketDelete(id: $id) {
+      deletedId
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Market Localizations - Register regions to market
+ */
+export const MARKET_LOCALIZATIONS_REGISTER = `
+  mutation marketLocalizationsRegister($marketId: ID!, $marketLocalizationsToCreate: [MarketLocalizationRegisterInput!]!) {
+    marketLocalizationsRegister(
+      marketId: $marketId
+      marketLocalizationsToCreate: $marketLocalizationsToCreate
+    ) {
+      marketLocalizations {
+        marketId
+        key
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Market Localizations - Remove regions from market
+ */
+export const MARKET_LOCALIZATIONS_REMOVE = `
+  mutation marketLocalizationsRemove($marketLocalizationKeys: [MarketLocalizationKeyInput!]!, $marketId: ID!) {
+    marketLocalizationsRemove(
+      marketLocalizationKeys: $marketLocalizationKeys
+      marketId: $marketId
+    ) {
+      removedIds
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Market Web Presence - Create
+ */
+export const MARKET_WEB_PRESENCE_CREATE = `
+  mutation marketWebPresenceCreate($marketId: ID!, $webPresence: MarketWebPresenceCreateInput!) {
+    marketWebPresenceCreate(marketId: $marketId, webPresence: $webPresence) {
+      marketWebPresence {
+        id
+        defaultLocale {
+          locale
+        }
+        alternateLocales {
+          locale
+        }
+        domain {
+          id
+          host
+        }
+        subfolderSuffix
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Market Web Presence - Update
+ */
+export const MARKET_WEB_PRESENCE_UPDATE = `
+  mutation marketWebPresenceUpdate($id: ID!, $webPresence: MarketWebPresenceUpdateInput!) {
+    marketWebPresenceUpdate(id: $id, webPresence: $webPresence) {
+      marketWebPresence {
+        id
+        defaultLocale {
+          locale
+        }
+        alternateLocales {
+          locale
+        }
+        domain {
+          id
+          host
+        }
+        subfolderSuffix
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+/**
+ * Market Web Presence - Delete
+ */
+export const MARKET_WEB_PRESENCE_DELETE = `
+  mutation marketWebPresenceDelete($id: ID!) {
+    marketWebPresenceDelete(id: $id) {
+      deletedWebPresenceId
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;

@@ -53,6 +53,8 @@ npm run cli -- redirects:dump -o redirects.json       # Export redirects
 npm run cli -- redirects:apply -f redirects.json      # Import redirects
 npm run cli -- policies:dump -o policies.json         # Export shop policies
 npm run cli -- policies:apply -f policies.json        # Import shop policies
+npm run cli -- integrations:dump -o integrations.json # Export webhooks & pixels
+npm run cli -- integrations:apply -f integrations.json # Import webhooks & pixels
 npm run cli -- discounts:dump -o discounts.json       # Export discounts
 npm run cli -- discounts:apply -f discounts.json      # Import discounts
 # OR for bulk imports (faster): --csv flag + manual import via Shopify Admin
@@ -272,7 +274,7 @@ npm run cli -- data:dump --collections-only -o <dir>
 npm run cli -- data:dump --pages-only -o <dir>
 ```
 
-### Menus, Redirects, Policies & Discounts
+### Menus, Redirects, Policies, Integrations & Discounts
 
 ```bash
 npm run cli -- menus:dump -o <file>       # Export menus
@@ -284,6 +286,9 @@ npm run cli -- redirects:apply -f <file>  # Import redirects
 
 npm run cli -- policies:dump -o <file>    # Export shop policies (refund, privacy, terms, shipping, contact)
 npm run cli -- policies:apply -f <file>   # Import shop policies
+
+npm run cli -- integrations:dump -o <file>   # Export webhook subscriptions and web pixels
+npm run cli -- integrations:apply -f <file>  # Import webhook subscriptions and web pixels
 
 npm run cli -- discounts:dump -o <file>   # Export discounts (automatic + code-based)
 npm run cli -- discounts:apply -f <file>  # Import discounts (with product/collection remapping)

@@ -15,6 +15,7 @@
  * - menus:dump/apply - Handle menus
  * - redirects:dump/apply - Handle redirects
  * - policies:dump/apply - Handle shop policies
+ * - integrations:dump/apply - Handle webhooks and pixels
  * - discounts:dump/apply - Handle discounts (automatic and code-based)
  */
 
@@ -52,6 +53,8 @@ import {
   applyRedirects,
   dumpPolicies,
   applyPolicies,
+  dumpIntegrations,
+  applyIntegrations,
   dumpDiscounts,
   applyDiscounts,
   logger,
@@ -1152,6 +1155,129 @@ program
     }
 
     logger.info("\n✓ Policies apply complete");
+  });
+
+/**
+ * INTEGRATIONS COMMANDS (Webhooks & Pixels)
+ */
+
+program
+  .command("integrations:dump")
+  .description("Dump webhook subscriptions and web pixels from source store")
+  .option("-o, --output <file>", "Output file", "./dumps/integrations.json")
+  .action(async (options) => {
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.srcShop || !globalOpts.srcToken) {
+      logger.error(
+        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.srcShop,
+      accessToken: globalOpts.srcToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    const outputPath = resolveWorkspacePath(options.output);
+
+    logger.info(`Dumping integrations to ${outputPath}`);
+
+    const result = await dumpIntegrations(client, outputPath);
+
+    if (!result.ok) {
+      logger.error("Integrations dump failed", {
+        error: result.error.message,
+      });
+      process.exit(1);
+    }
+
+    logger.info("✓ Integrations dump complete");
+  });
+
+program
+  .command("integrations:apply")
+  .description(
+    "Apply webhook subscriptions and web pixels to destination store"
+  )
+  .option("-f, --file <file>", "Input file", "./dumps/integrations.json")
+  .action(async (options) => {
+    const globalOpts = program.opts();
+
+    if (globalOpts.verbose) {
+      process.env.LOG_LEVEL = "debug";
+    }
+
+    if (!globalOpts.dstShop || !globalOpts.dstToken) {
+      logger.error(
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+      );
+      process.exit(1);
+    }
+
+    const client = createGraphQLClient({
+      shop: globalOpts.dstShop,
+      accessToken: globalOpts.dstToken,
+      apiVersion: globalOpts.apiVersion,
+    });
+
+    const filePath = resolveWorkspacePath(options.file);
+
+    if (globalOpts.dryRun) {
+      logger.info("[DRY RUN] Would apply integrations from:", { filePath });
+      return;
+    }
+
+    logger.info(`Applying integrations from ${filePath}`);
+
+    const result = await applyIntegrations(client, filePath);
+
+    if (!result.ok) {
+      logger.error("Integrations apply failed", {
+        error: result.error.message,
+      });
+      process.exit(1);
+    }
+
+    // Format and display stats table
+    console.log("\nWebhook Subscriptions:");
+    console.log("─".repeat(40));
+    console.log(
+      formatStatsTable("Webhooks", {
+        created: result.data.webhooks.created,
+        skipped: result.data.webhooks.skipped,
+        failed: result.data.webhooks.failed,
+      })
+    );
+
+    console.log("\nWeb Pixels:");
+    console.log("─".repeat(40));
+    console.log(
+      formatStatsTable("Pixels", {
+        created: result.data.pixels.created,
+        failed: result.data.pixels.failed,
+      })
+    );
+
+    // Report errors if any
+    if (result.data.errors.length > 0) {
+      logger.warn("\nIntegration errors:", result.data.errors);
+    }
+
+    // Exit with error if there are failures
+    const totalFailed = result.data.webhooks.failed + result.data.pixels.failed;
+    if (totalFailed > 0) {
+      logger.error(`\n${totalFailed} integrations failed to apply`);
+      process.exit(1);
+    }
+
+    logger.info("\n✓ Integrations apply complete");
   });
 
 /**

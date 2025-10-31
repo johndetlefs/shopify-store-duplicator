@@ -27,6 +27,8 @@ npm run cli -- redirects:dump -o redirects.json && \
 npm run cli -- redirects:apply -f redirects.json && \
 npm run cli -- policies:dump -o policies.json && \
 npm run cli -- policies:apply -f policies.json && \
+npm run cli -- integrations:dump -o integrations.json && \
+npm run cli -- integrations:apply -f integrations.json && \
 npm run cli -- discounts:dump -o discounts.json && \
 npm run cli -- discounts:apply -f discounts.json && \
 echo "✅ Migration complete!"
@@ -90,11 +92,11 @@ npm run cli -- policies:dump -o policies.json   # Export
 npm run cli -- policies:apply -f policies.json  # Import
 ```
 
-### Discounts
+### Integrations (Webhooks & Pixels)
 
 ```bash
-npm run cli -- discounts:dump -o discounts.json # Export (automatic + code-based)
-npm run cli -- discounts:apply -f discounts.json # Import (with product/collection remapping)
+npm run cli -- integrations:dump -o integrations.json   # Export
+npm run cli -- integrations:apply -f integrations.json  # Import
 ```
 
 ### Discounts
@@ -151,6 +153,7 @@ npm run cli -- defs:apply -f defs.json --dry-run --verbose
 ✅ Navigation menus (with URL remapping)  
 ✅ URL redirects  
 ✅ Shop policies (refund, privacy, terms, shipping, contact)  
+✅ Webhooks & Pixels (event subscriptions + custom tracking)  
 ✅ Discounts (automatic + code-based: Basic, BXGY, Free Shipping)
 
 **All operations are idempotent** - safe to re-run without creating duplicates.
@@ -173,6 +176,7 @@ After `data:dump -o ./dumps`:
 ├── menus.json                       # Navigation menus
 ├── redirects.json                   # URL redirects
 ├── policies.json                    # Shop policies
+├── integrations.json                # Webhooks & pixels
 └── discounts.json                   # Discounts (automatic + code)
 ```
 
@@ -337,6 +341,7 @@ npm run cli -- data:dump -o ./prod-dumps
 npm run cli -- menus:dump -o prod-menus.json
 npm run cli -- redirects:dump -o prod-redirects.json
 npm run cli -- policies:dump -o prod-policies.json
+npm run cli -- integrations:dump -o prod-integrations.json
 npm run cli -- discounts:dump -o prod-discounts.json
 
 # 3. Import during maintenance window
@@ -345,6 +350,7 @@ npm run cli -- data:apply -i ./prod-dumps
 npm run cli -- menus:apply -f prod-menus.json
 npm run cli -- redirects:apply -f prod-redirects.json
 npm run cli -- policies:apply -f prod-policies.json
+npm run cli -- integrations:apply -f prod-integrations.json
 npm run cli -- discounts:apply -f prod-discounts.json
 
 # 4. Validate everything

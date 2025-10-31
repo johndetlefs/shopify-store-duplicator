@@ -98,6 +98,16 @@ Use **Shopify Admin GraphQL** with **Bulk Operations** for large reads/writes wh
 - `policies:dump` → Export shop policies (refund, privacy, terms, shipping, contact)
 - `policies:apply` → Import shop policies (idempotent)
 
+### Integrations
+
+- `integrations:dump` → Export webhook subscriptions and web pixels
+- `integrations:apply` → Import webhooks & pixels (webhooks idempotent by topic+uri, pixels create new)
+
+### Discounts
+
+- `discounts:dump` → Export automatic and code-based discounts
+- `discounts:apply` → Import discounts with product/collection reference remapping
+
 ### Files & Publications (Integrated into data:apply)
 
 - **Files:** Automatically uploaded and relinked during `data:apply`. File references in metaobjects/metafields are updated to destination GIDs.
@@ -198,6 +208,8 @@ Use **Shopify Admin GraphQL** with **Bulk Operations** for large reads/writes wh
 - ✅ Navigation menus (with URL remapping)
 - ✅ URL redirects
 - ✅ Shop policies (refund, privacy, terms, shipping, contact)
+- ✅ Webhooks & Pixels (event subscriptions + custom tracking)
+- ✅ Discounts (automatic + code-based: Basic, BXGY, Free Shipping)
 - ✅ Validation tools (defs:diff, data:diff)
 - ✅ Complete CLI with all commands
 - ✅ Comprehensive error handling and stats

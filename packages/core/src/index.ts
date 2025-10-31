@@ -50,6 +50,10 @@ export * from "./redirects/apply.js";
 export * from "./policies/dump.js";
 export * from "./policies/apply.js";
 
+// Integrations (Webhooks & Pixels)
+export * from "./integrations/dump.js";
+export * from "./integrations/apply.js";
+
 // Discounts
 export * from "./discounts/dump.js";
 export * from "./discounts/apply.js";

@@ -513,8 +513,14 @@ async function applyMetaobjectsForType(
     ? relinkMetaobjects(metaobjects, fileIndex)
     : metaobjects;
 
+  // Create progress bar for metaobject processing
+  const progressBar = createProgressBar(relinkedMetaobjects.length, {
+    format: `Metaobjects (${type}) :bar :percent (:current/:total) :eta`,
+  });
+
   for (const metaobj of relinkedMetaobjects) {
     stats.total++;
+    progressBar.tick();
 
     try {
       // Build fields with remapped references
@@ -573,6 +579,9 @@ async function applyMetaobjectsForType(
       });
     }
   }
+
+  // Complete the progress bar
+  progressBar.complete();
 
   logger.info(
     `✓ Applied ${stats.created} metaobjects of type ${type} (${stats.failed} failed)`
@@ -910,8 +919,14 @@ export async function applyProductMetafields(
     `Setting ${allMetafields.length} product metafields in ${chunks.length} batches`
   );
 
+  // Create progress bar for metafield batch processing
+  const progressBar = createProgressBar(chunks.length, {
+    format: "Product Metafields :bar :percent (:current/:total) :eta",
+  });
+
   for (const chunk of chunks) {
     stats.total += chunk.length;
+    progressBar.tick();
 
     try {
       const result = await client.request({
@@ -952,6 +967,9 @@ export async function applyProductMetafields(
       logger.warn("Metafields batch exception", { error: String(error) });
     }
   }
+
+  // Complete the progress bar
+  progressBar.complete();
 
   logger.info(
     `✓ Applied ${stats.created} product metafields (${stats.failed} failed)`
@@ -1032,8 +1050,14 @@ export async function applyCollectionMetafields(
     `Setting ${allMetafields.length} collection metafields in ${chunks.length} batches`
   );
 
+  // Create progress bar for metafield batch processing
+  const progressBar = createProgressBar(chunks.length, {
+    format: "Collection Metafields :bar :percent (:current/:total) :eta",
+  });
+
   for (const chunk of chunks) {
     stats.total += chunk.length;
+    progressBar.tick();
 
     try {
       const result = await client.request({
@@ -1069,6 +1093,9 @@ export async function applyCollectionMetafields(
       stats.errors.push({ error: String(error) });
     }
   }
+
+  // Complete the progress bar
+  progressBar.complete();
 
   logger.info(
     `✓ Applied ${stats.created} collection metafields (${stats.failed} failed)`
@@ -1145,8 +1172,14 @@ export async function applyPageMetafields(
     `Setting ${allMetafields.length} page metafields in ${chunks.length} batches`
   );
 
+  // Create progress bar for metafield batch processing
+  const progressBar = createProgressBar(chunks.length, {
+    format: "Page Metafields :bar :percent (:current/:total) :eta",
+  });
+
   for (const chunk of chunks) {
     stats.total += chunk.length;
+    progressBar.tick();
 
     try {
       const result = await client.request({
@@ -1182,6 +1215,9 @@ export async function applyPageMetafields(
       stats.errors.push({ error: String(error) });
     }
   }
+
+  // Complete the progress bar
+  progressBar.complete();
 
   logger.info(
     `✓ Applied ${stats.created} page metafields (${stats.failed} failed)`
@@ -1910,8 +1946,14 @@ export async function applyCollections(
   const content = fs.readFileSync(inputFile, "utf-8");
   const lines = content.split("\n").filter((l) => l.trim());
 
+  // Create progress bar for collection processing
+  const progressBar = createProgressBar(lines.length, {
+    format: "Collections :bar :percent (:current/:total) :eta",
+  });
+
   for (const line of lines) {
     stats.total++;
+    progressBar.tick();
 
     try {
       const collection = JSON.parse(line) as DumpedCollection;
@@ -2074,6 +2116,9 @@ export async function applyCollections(
     }
   }
 
+  // Complete the progress bar
+  progressBar.complete();
+
   logger.info(
     `✓ Applied ${stats.total} collections: ${stats.created} created, ${stats.updated} updated, ${stats.failed} failed`
   );
@@ -2120,8 +2165,14 @@ export async function applyPages(
   const content = fs.readFileSync(inputFile, "utf-8");
   const lines = content.split("\n").filter((l) => l.trim());
 
+  // Create progress bar for page processing
+  const progressBar = createProgressBar(lines.length, {
+    format: "Pages :bar :percent (:current/:total) :eta",
+  });
+
   for (const line of lines) {
     stats.total++;
+    progressBar.tick();
 
     try {
       const page = JSON.parse(line) as DumpedPage;
@@ -2224,6 +2275,9 @@ export async function applyPages(
     }
   }
 
+  // Complete the progress bar
+  progressBar.complete();
+
   logger.info(
     `✓ Applied ${stats.created + stats.updated} pages (${
       stats.created
@@ -2264,8 +2318,14 @@ export async function applyBlogs(
   const content = fs.readFileSync(inputFile, "utf-8");
   const lines = content.split("\n").filter((l) => l.trim());
 
+  // Create progress bar for blog processing
+  const progressBar = createProgressBar(lines.length, {
+    format: "Blogs :bar :percent (:current/:total) :eta",
+  });
+
   for (const line of lines) {
     stats.total++;
+    progressBar.tick();
     try {
       const blog = JSON.parse(line) as DumpedBlog;
 
@@ -2365,6 +2425,9 @@ export async function applyBlogs(
     }
   }
 
+  // Complete the progress bar
+  progressBar.complete();
+
   logger.info(
     `✓ Applied ${stats.created + stats.updated} blogs (${
       stats.created
@@ -2405,8 +2468,14 @@ export async function applyArticles(
   const content = fs.readFileSync(inputFile, "utf-8");
   const lines = content.split("\n").filter((l) => l.trim());
 
+  // Create progress bar for article processing
+  const progressBar = createProgressBar(lines.length, {
+    format: "Articles :bar :percent (:current/:total) :eta",
+  });
+
   for (const line of lines) {
     stats.total++;
+    progressBar.tick();
     try {
       const article = JSON.parse(line) as DumpedArticle;
 
@@ -2573,6 +2642,9 @@ export async function applyArticles(
       logger.warn("Failed to process article line", { error: String(error) });
     }
   }
+
+  // Complete the progress bar
+  progressBar.complete();
 
   logger.info(
     `✓ Applied ${stats.created + stats.updated} articles (${

@@ -1259,6 +1259,43 @@ export const PRODUCT_CREATE_MEDIA = `
   }
 `;
 
+export const PRODUCT_DELETE_MEDIA = `
+  mutation productDeleteMedia($productId: ID!, $mediaIds: [ID!]!) {
+    productDeleteMedia(productId: $productId, mediaIds: $mediaIds) {
+      deletedMediaIds
+      deletedProductImageIds
+      mediaUserErrors {
+        field
+        message
+      }
+      product {
+        id
+      }
+    }
+  }
+`;
+
+export const GET_PRODUCT_MEDIA = `
+  query getProductMedia($id: ID!) {
+    product(id: $id) {
+      id
+      media(first: 250) {
+        edges {
+          node {
+            id
+            ... on MediaImage {
+              alt
+              image {
+                url
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
 export const PRODUCT_VARIANT_BULK_CREATE = `
   mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
     productVariantsBulkCreate(productId: $productId, variants: $variants) {

@@ -1414,12 +1414,62 @@ export async function applyProducts(
           continue;
         }
 
-        // Update media separately if present
+        // Update media separately if present (idempotent: delete existing, then add)
         if (product.media && product.media.length > 0 && fileIndex) {
-          const { PRODUCT_CREATE_MEDIA } = await import(
-            "../graphql/queries.js"
-          );
+          const {
+            PRODUCT_CREATE_MEDIA,
+            PRODUCT_DELETE_MEDIA,
+            GET_PRODUCT_MEDIA,
+          } = await import("../graphql/queries.js");
 
+          // Step 1: Query existing media
+          const existingMediaResult = await client.request({
+            query: GET_PRODUCT_MEDIA,
+            variables: { id: existingProductGid },
+          });
+
+          // Step 2: Delete existing media if any
+          if (
+            existingMediaResult.ok &&
+            existingMediaResult.data.data?.product?.media?.edges?.length > 0
+          ) {
+            const mediaIds =
+              existingMediaResult.data.data.product.media.edges.map(
+                (edge: any) => edge.node.id
+              );
+
+            const deleteResult = await client.request({
+              query: PRODUCT_DELETE_MEDIA,
+              variables: {
+                productId: existingProductGid,
+                mediaIds: mediaIds,
+              },
+            });
+
+            if (!deleteResult.ok) {
+              logger.warn(
+                `Failed to delete existing media for product ${product.handle}`,
+                { error: deleteResult.error.message }
+              );
+            } else if (
+              deleteResult.data.data?.productDeleteMedia?.mediaUserErrors
+                ?.length > 0
+            ) {
+              logger.warn(
+                `Media deletion warnings for product ${product.handle}`,
+                {
+                  errors:
+                    deleteResult.data.data.productDeleteMedia.mediaUserErrors,
+                }
+              );
+            } else {
+              logger.debug(
+                `✓ Deleted ${mediaIds.length} existing media items from product: ${product.handle}`
+              );
+            }
+          }
+
+          // Step 3: Add new media
           const mediaInputs = product.media
             .map((m) => {
               // Use destination URL for productCreateMedia (not GID)

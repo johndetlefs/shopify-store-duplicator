@@ -34,6 +34,20 @@ class Logger {
     return LOG_LEVELS[level] >= LOG_LEVELS[this.level];
   }
 
+  /**
+   * Update the logger level dynamically
+   */
+  setLevel(level: LogLevel): void {
+    this.level = level;
+  }
+
+  /**
+   * Get current log level
+   */
+  getLevel(): LogLevel {
+    return this.level;
+  }
+
   private formatMessage(
     level: LogLevel,
     message: string,

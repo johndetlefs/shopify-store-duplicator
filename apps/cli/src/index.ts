@@ -23,6 +23,16 @@ import { Command } from "commander";
 import dotenv from "dotenv";
 import { readFile, writeFile } from "fs/promises";
 import { createInterface } from "readline";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+
+// CRITICAL: Load environment variables BEFORE importing anything that uses them
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const workspaceRoot = resolve(__dirname, "../../../");
+dotenv.config({ path: resolve(workspaceRoot, ".env") });
+
+// NOW import modules that depend on environment variables (like logger)
 import {
   createGraphQLClient,
   dumpDefinitions,
@@ -56,14 +66,6 @@ import {
   logger,
   type GraphQLClientConfig,
 } from "@shopify-duplicator/core";
-import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
-
-// Load environment variables from the workspace root
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const workspaceRoot = resolve(__dirname, "../../../");
-dotenv.config({ path: resolve(workspaceRoot, ".env") });
 
 /**
  * Helper to resolve paths relative to workspace root
@@ -188,7 +190,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.srcShop || !globalOpts.srcToken) {
@@ -237,7 +239,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
@@ -317,7 +319,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.srcShop || !globalOpts.srcToken) {
@@ -379,7 +381,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
@@ -651,7 +653,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
@@ -702,7 +704,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
@@ -826,7 +828,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.srcShop || !globalOpts.srcToken) {
@@ -863,7 +865,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
@@ -944,7 +946,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.srcShop || !globalOpts.srcToken) {
@@ -989,7 +991,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
@@ -1046,7 +1048,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.srcShop || !globalOpts.srcToken) {
@@ -1084,7 +1086,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
@@ -1171,7 +1173,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.srcShop || !globalOpts.srcToken) {
@@ -1209,7 +1211,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
@@ -1297,7 +1299,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
@@ -1515,7 +1517,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
@@ -1656,7 +1658,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.srcShop || !globalOpts.srcToken) {
@@ -1697,7 +1699,7 @@ program
     const globalOpts = program.opts();
 
     if (globalOpts.verbose) {
-      process.env.LOG_LEVEL = "debug";
+      logger.setLevel("debug");
     }
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {

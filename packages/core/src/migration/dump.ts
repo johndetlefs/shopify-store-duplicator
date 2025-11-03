@@ -33,6 +33,7 @@ import { logger } from "../utils/logger.js";
 import { err, type Result } from "../utils/types.js";
 import { dumpFiles } from "../files/dump.js";
 import { enrichAllReferences } from "./enrich-references.js";
+import { createProgressBar } from "../utils/progress.js";
 
 // ============================================================================
 // Types
@@ -1070,8 +1071,15 @@ export async function dumpProducts(
 
   // Fetch publications for each product (done separately to avoid bulk query connection limit)
   logger.info(`Fetching publications for ${transformed.length} products...`);
+
+  // Create progress bar for publication fetching
+  const progressBar = createProgressBar(transformed.length, {
+    format: "Product Publications :bar :percent (:current/:total) :eta",
+  });
+
   let publicationsFetched = 0;
   for (const product of transformed) {
+    progressBar.tick();
     try {
       const { PRODUCT_PUBLICATIONS_QUERY } = await import(
         "../graphql/queries.js"
@@ -1096,6 +1104,10 @@ export async function dumpProducts(
       // Continue - publications are optional
     }
   }
+
+  // Complete the progress bar
+  progressBar.complete();
+
   logger.info(`✓ Fetched publications for ${publicationsFetched} products`);
 
   // Write to file
@@ -1237,8 +1249,15 @@ export async function dumpCollections(
 
   // Fetch publications for each collection (done separately to avoid bulk query connection limit)
   logger.info(`Fetching publications for ${transformed.length} collections...`);
+
+  // Create progress bar for publication fetching
+  const progressBar = createProgressBar(transformed.length, {
+    format: "Collection Publications :bar :percent (:current/:total) :eta",
+  });
+
   let publicationsFetched = 0;
   for (const collection of transformed) {
+    progressBar.tick();
     try {
       const { COLLECTION_PUBLICATIONS_QUERY } = await import(
         "../graphql/queries.js"
@@ -1266,6 +1285,10 @@ export async function dumpCollections(
       // Continue - publications are optional
     }
   }
+
+  // Complete the progress bar
+  progressBar.complete();
+
   logger.info(`✓ Fetched publications for ${publicationsFetched} collections`);
 
   // Write to file

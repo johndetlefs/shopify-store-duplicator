@@ -31,7 +31,7 @@ Migrate **all custom data** from a source Shopify store to a destination store:
 - Node.js 20+
 - Dev Dashboard apps installed on source and destination stores (recommended: separate apps)
 - Source and destination app credentials (`CLIENT_ID` + `SECRET`) or pre-minted admin tokens
-- Required API scopes for migrated resources (products, collections, metaobjects, content, files, online store navigation/pages, discounts, markets)
+- Required API scopes configured per app (see SRC vs DST scope lists below)
 
 ## Quick Start
 
@@ -254,27 +254,64 @@ LOG_FORMAT=pretty       # pretty | json
 
 Use Dev Dashboard app credentials + OAuth code exchange.
 
-1. Create app(s) in **Dev Dashboard** and create a released version with required scopes.
-2. Add allowed redirect URL(s):
+1. Create two custom apps in **Dev Dashboard** (recommended):
 
-- `http://localhost:3456/oauth/callback`
-- `http://localhost:3457/oauth/callback`
+- **SRC app** (read-only)
+- **DST app** (write-capable)
 
-3. Install app on the relevant store.
-4. Set `.env` credentials (`SRC_*` and `DST_*`).
-5. Generate tokens with CLI:
+2. For each app, create/release a version with required scopes.
+3. Set OAuth URLs so hostnames match (required by Shopify):
+
+- **SRC app** Application URL: `http://localhost:3456`
+- **SRC app** Redirect URL: `http://localhost:3456/oauth/callback`
+- **DST app** Application URL: `http://localhost:3457`
+- **DST app** Redirect URL: `http://localhost:3457/oauth/callback`
+
+4. Install each app on its store.
+5. Set `.env` credentials (`SRC_*` and `DST_*`).
+6. Generate tokens with CLI:
 
 - `npm run cli -- auth:src-token` (source)
 - `npm run cli -- auth:dst-token` (destination)
 
-6. Approve each browser prompt; copy printed `SRC_ADMIN_TOKEN` / `DST_ADMIN_TOKEN` into `.env`.
+7. Approve each browser prompt; copy printed `SRC_ADMIN_TOKEN` / `DST_ADMIN_TOKEN` into `.env`.
 
-Recommended scope split:
+### Required Scopes (SRC vs DST)
 
-- Source app (read-only):
-  - `read_products`, `read_collections`, `read_metaobjects`, `read_content`, `read_files`, `read_online_store_navigation`, `read_online_store_pages`, `read_discounts`, `read_markets`
-- Destination app (write):
-  - `write_products`, `write_collections`, `write_metaobjects`, `write_content`, `write_files`, `write_online_store_navigation`, `write_online_store_pages`, `write_discounts`, `write_markets`
+The safest setup is read-only source + write destination.
+
+**SRC app (read-only):**
+
+- `read_metaobject_definitions`
+- `read_metaobjects`
+- `read_products`
+- `read_collections`
+- `read_content`
+- `read_files`
+- `read_online_store_navigation`
+- `read_online_store_pages`
+- `read_discounts`
+- `read_markets`
+- `read_publications`
+
+**DST app (write-capable):**
+
+- `read_metaobject_definitions`, `write_metaobject_definitions`
+- `read_metaobjects`, `write_metaobjects`
+- `read_products`, `write_products`
+- `read_collections`, `write_collections`
+- `read_content`, `write_content`
+- `read_files`, `write_files`
+- `read_online_store_navigation`, `write_online_store_navigation`
+- `read_online_store_pages`, `write_online_store_pages`
+- `read_discounts`, `write_discounts`
+- `read_markets`, `write_markets`
+- `read_publications`, `write_publications`
+
+Why publications scopes are required:
+
+- `data:dump` reads publication state from source products/collections.
+- `data:apply` reads destination publications and syncs publish/unpublish state.
 
 ## CLI Commands Reference
 

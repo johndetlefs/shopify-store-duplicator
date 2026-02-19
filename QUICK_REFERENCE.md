@@ -2,25 +2,12 @@
 
 ## Complete Migration (One-Liner)
 
-````bash
+```bash
 # Full migration workflow
 npm run cli -- defs:dump -o defs.json && \
 npm run cli -- defs:apply -f defs.json && \
 npm run cli -- data:dump -o ./dumps && \
-npm run cli -- dat# 4. Dry run to preview
-npm run cli -- defs:apply -f test-defs.json --dry-run --verbose
-npm run cli -- data:apply -i ./test-dumps --dry-run --verbose
-
-# 5. Apply for real
-npm run cli -- defs:apply -f test-defs.json
-npm run cli -- data:apply -i ./test-dumps
-
-# 6. Validate
-npm run cli -- defs:diff -f test-defs.json
-# Optional: Skip usage check for faster validation
-# npm run cli -- defs:diff -f test-defs.json --no-usage-check
-npm run cli -- data:diff -i ./test-dumps
-```/dumps && \
+npm run cli -- data:apply -i ./dumps && \
 npm run cli -- menus:dump -o menus.json && \
 npm run cli -- menus:apply -f menus.json && \
 npm run cli -- redirects:dump -o redirects.json && \
@@ -32,7 +19,14 @@ npm run cli -- discounts:apply -f discounts.json && \
 npm run cli -- markets:dump -o markets.json && \
 npm run cli -- markets:apply -f markets.json && \
 echo "✅ Migration complete!"
-````
+```
+
+**Dry run preview**
+
+```bash
+npm run cli -- defs:apply -f defs.json --dry-run --verbose
+npm run cli -- data:apply -i ./dumps --dry-run --verbose
+```
 
 ## Essential Commands
 

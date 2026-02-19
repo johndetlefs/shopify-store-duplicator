@@ -290,7 +290,7 @@ export const METAOBJECT_UPSERT = `
  */
 export const PRODUCTS_BULK = `
   {
-    products {
+    products(query: "published_status:any") {
       edges {
         node {
           id

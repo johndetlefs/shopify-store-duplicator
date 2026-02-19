@@ -99,6 +99,8 @@ interface DumpedField {
     variantProductHandle?: string;
     collectionHandle?: string;
     pageHandle?: string;
+    fileUrl?: string;
+    fileGid?: string;
     gid?: string; // For types without natural keys (e.g., TaxonomyValue)
   }>;
 }
@@ -258,13 +260,13 @@ interface ApplyStats {
  */
 function remapReference(
   field: DumpedField,
-  index: DestinationIndex
+  index: DestinationIndex,
 ): string | undefined {
   if (field.refMetaobject) {
     return gidForMetaobject(
       index,
       field.refMetaobject.type,
-      field.refMetaobject.handle
+      field.refMetaobject.handle,
     );
   }
 
@@ -288,7 +290,17 @@ function remapReference(
 
   // Files: keep the URL as-is (files are handled separately)
   if (field.refFile) {
-    return field.refFile.url;
+    if (typeof field.value === "string" && field.value.startsWith("gid://")) {
+      // relinkMetaobjects updates field.value to destination file GID
+      return field.value;
+    }
+
+    logger.warn("Failed to remap file reference to destination GID", {
+      key: field.key,
+      url: field.refFile.url,
+      value: field.value,
+    });
+    return undefined;
   }
 
   return undefined;
@@ -300,7 +312,7 @@ function remapReference(
  */
 function remapReferenceList(
   refList: DumpedField["refList"],
-  index: DestinationIndex
+  index: DestinationIndex,
 ): string[] {
   if (!refList) return [];
 
@@ -319,6 +331,8 @@ function remapReferenceList(
       gid = gidForCollectionHandle(index, ref.collectionHandle);
     } else if (ref.pageHandle) {
       gid = gidForPageHandle(index, ref.pageHandle);
+    } else if (ref.fileGid) {
+      gid = ref.fileGid;
     } else if (ref.gid) {
       // For types without natural keys (e.g., TaxonomyValue), use the GID directly
       gid = ref.gid;
@@ -339,13 +353,13 @@ function remapReferenceList(
  */
 function remapMetafieldReference(
   mf: DumpedMetafield,
-  index: DestinationIndex
+  index: DestinationIndex,
 ): string | undefined {
   if (mf.refMetaobject) {
     return gidForMetaobject(
       index,
       mf.refMetaobject.type,
-      mf.refMetaobject.handle
+      mf.refMetaobject.handle,
     );
   }
 
@@ -365,7 +379,7 @@ function remapMetafieldReference(
  */
 function buildFieldValue(
   field: DumpedField,
-  index: DestinationIndex
+  index: DestinationIndex,
 ): string | null {
   // If there's a reference, remap it
   if (
@@ -404,7 +418,7 @@ function buildFieldValue(
  */
 function buildMetafieldValue(
   mf: DumpedMetafield,
-  index: DestinationIndex
+  index: DestinationIndex,
 ): string | null {
   // If there's a single reference, remap it
   if (mf.refMetaobject || mf.refProduct || mf.refCollection) {
@@ -418,13 +432,13 @@ function buildMetafieldValue(
           refType: mf.refMetaobject
             ? "metaobject"
             : mf.refProduct
-            ? "product"
-            : "collection",
+              ? "product"
+              : "collection",
           refHandle:
             mf.refMetaobject?.handle ||
             mf.refProduct?.handle ||
             mf.refCollection?.handle,
-        }
+        },
       );
       return null; // Skip this metafield - reference is invalid
     }
@@ -483,7 +497,7 @@ async function applyMetaobjectsForType(
   type: string,
   inputFile: string,
   index: DestinationIndex,
-  fileIndex?: FileIndex
+  fileIndex?: FileIndex,
 ): Promise<ApplyStats> {
   logger.info(`Applying metaobjects of type: ${type}`);
 
@@ -584,7 +598,7 @@ async function applyMetaobjectsForType(
   progressBar.complete();
 
   logger.info(
-    `✓ Applied ${stats.created} metaobjects of type ${type} (${stats.failed} failed)`
+    `✓ Applied ${stats.created} metaobjects of type ${type} (${stats.failed} failed)`,
   );
   return stats;
 }
@@ -624,7 +638,7 @@ async function syncPublications(
       }>
     | undefined,
   index: DestinationIndex,
-  resourceHandle: string
+  resourceHandle: string,
 ): Promise<{ synced: number; errors: string[] }> {
   const errors: string[] = [];
 
@@ -644,7 +658,7 @@ async function syncPublications(
 
     if (!destPubId) {
       logger.debug(
-        `Publication "${pubName}" not found in destination, skipping for ${resourceHandle}`
+        `Publication "${pubName}" not found in destination, skipping for ${resourceHandle}`,
       );
       continue;
     }
@@ -683,7 +697,7 @@ async function syncPublications(
 
       if (!unpublishResult.ok) {
         logger.debug(
-          `Error unpublishing ${resourceHandle}: ${unpublishResult.error.message}`
+          `Error unpublishing ${resourceHandle}: ${unpublishResult.error.message}`,
         );
         // Continue anyway
       } else if (
@@ -724,7 +738,7 @@ async function syncPublications(
     if (!publishResult.ok) {
       errors.push(publishResult.error.message);
       logger.warn(
-        `Publish errors for ${resourceHandle}: ${publishResult.error.message}`
+        `Publish errors for ${resourceHandle}: ${publishResult.error.message}`,
       );
       return { synced: 0, errors };
     }
@@ -739,14 +753,14 @@ async function syncPublications(
     }
 
     logger.debug(
-      `✓ Synced publications for ${resourceHandle} (published to ${publicationsToPublish.length} channels)`
+      `✓ Synced publications for ${resourceHandle} (published to ${publicationsToPublish.length} channels)`,
     );
     return { synced: publicationsToPublish.length, errors };
   } catch (error) {
     const errorMsg = String(error);
     errors.push(errorMsg);
     logger.warn(
-      `Failed to sync publications for ${resourceHandle}: ${errorMsg}`
+      `Failed to sync publications for ${resourceHandle}: ${errorMsg}`,
     );
     return { synced: 0, errors };
   }
@@ -759,7 +773,7 @@ export async function applyMetaobjects(
   client: GraphQLClient,
   inputDir: string,
   index: DestinationIndex,
-  fileIndex?: FileIndex
+  fileIndex?: FileIndex,
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Metaobjects ===");
 
@@ -799,7 +813,7 @@ export async function applyMetaobjects(
       type,
       inputFile,
       index,
-      fileIndex
+      fileIndex,
     );
 
     // Aggregate stats
@@ -830,7 +844,7 @@ export async function applyMetaobjects(
 export async function applyProductMetafields(
   client: GraphQLClient,
   inputFile: string,
-  index: DestinationIndex
+  index: DestinationIndex,
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Product Metafields ===");
 
@@ -916,7 +930,7 @@ export async function applyProductMetafields(
   // Batch metafields in chunks of 25 (Shopify limit)
   const chunks = chunkArray(allMetafields, 25);
   logger.info(
-    `Setting ${allMetafields.length} product metafields in ${chunks.length} batches`
+    `Setting ${allMetafields.length} product metafields in ${chunks.length} batches`,
   );
 
   // Create progress bar for metafield batch processing
@@ -972,7 +986,7 @@ export async function applyProductMetafields(
   progressBar.complete();
 
   logger.info(
-    `✓ Applied ${stats.created} product metafields (${stats.failed} failed)`
+    `✓ Applied ${stats.created} product metafields (${stats.failed} failed)`,
   );
   return ok(stats);
 }
@@ -983,7 +997,7 @@ export async function applyProductMetafields(
 export async function applyCollectionMetafields(
   client: GraphQLClient,
   inputFile: string,
-  index: DestinationIndex
+  index: DestinationIndex,
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Collection Metafields ===");
 
@@ -1019,7 +1033,7 @@ export async function applyCollectionMetafields(
 
       if (!collectionGid) {
         logger.warn(
-          `Collection not found in destination: ${collection.handle}`
+          `Collection not found in destination: ${collection.handle}`,
         );
         stats.skipped++;
         continue;
@@ -1047,7 +1061,7 @@ export async function applyCollectionMetafields(
   // Batch in chunks of 25
   const chunks = chunkArray(allMetafields, 25);
   logger.info(
-    `Setting ${allMetafields.length} collection metafields in ${chunks.length} batches`
+    `Setting ${allMetafields.length} collection metafields in ${chunks.length} batches`,
   );
 
   // Create progress bar for metafield batch processing
@@ -1098,7 +1112,7 @@ export async function applyCollectionMetafields(
   progressBar.complete();
 
   logger.info(
-    `✓ Applied ${stats.created} collection metafields (${stats.failed} failed)`
+    `✓ Applied ${stats.created} collection metafields (${stats.failed} failed)`,
   );
   return ok(stats);
 }
@@ -1109,7 +1123,7 @@ export async function applyCollectionMetafields(
 export async function applyPageMetafields(
   client: GraphQLClient,
   inputFile: string,
-  index: DestinationIndex
+  index: DestinationIndex,
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Page Metafields ===");
 
@@ -1169,7 +1183,7 @@ export async function applyPageMetafields(
   // Batch in chunks of 25
   const chunks = chunkArray(allMetafields, 25);
   logger.info(
-    `Setting ${allMetafields.length} page metafields in ${chunks.length} batches`
+    `Setting ${allMetafields.length} page metafields in ${chunks.length} batches`,
   );
 
   // Create progress bar for metafield batch processing
@@ -1220,7 +1234,7 @@ export async function applyPageMetafields(
   progressBar.complete();
 
   logger.info(
-    `✓ Applied ${stats.created} page metafields (${stats.failed} failed)`
+    `✓ Applied ${stats.created} page metafields (${stats.failed} failed)`,
   );
   return ok(stats);
 }
@@ -1232,7 +1246,7 @@ export async function applyPageMetafields(
 export async function applyShopMetafields(
   client: GraphQLClient,
   inputFile: string,
-  index: DestinationIndex
+  index: DestinationIndex,
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Shop Metafields ===");
 
@@ -1298,7 +1312,7 @@ export async function applyShopMetafields(
   // Batch in chunks of 25
   const chunks = chunkArray(allMetafields, 25);
   logger.info(
-    `Setting ${allMetafields.length} shop metafields in ${chunks.length} batches`
+    `Setting ${allMetafields.length} shop metafields in ${chunks.length} batches`,
   );
 
   for (const chunk of chunks) {
@@ -1341,7 +1355,7 @@ export async function applyShopMetafields(
   }
 
   logger.info(
-    `✓ Shop metafields: ${stats.created} created, ${stats.failed} failed`
+    `✓ Shop metafields: ${stats.created} created, ${stats.failed} failed`,
   );
   return ok(stats);
 }
@@ -1359,7 +1373,7 @@ export async function applyProducts(
   client: GraphQLClient,
   inputFile: string,
   index: DestinationIndex,
-  fileIndex?: FileIndex
+  fileIndex?: FileIndex,
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Products ===");
 
@@ -1471,7 +1485,7 @@ export async function applyProducts(
           ) {
             const mediaIds =
               existingMediaResult.data.data.product.media.edges.map(
-                (edge: any) => edge.node.id
+                (edge: any) => edge.node.id,
               );
 
             const deleteResult = await client.request({
@@ -1485,7 +1499,7 @@ export async function applyProducts(
             if (!deleteResult.ok) {
               logger.warn(
                 `Failed to delete existing media for product ${product.handle}`,
-                { error: deleteResult.error.message }
+                { error: deleteResult.error.message },
               );
             } else if (
               deleteResult.data.data?.productDeleteMedia?.mediaUserErrors
@@ -1496,11 +1510,11 @@ export async function applyProducts(
                 {
                   errors:
                     deleteResult.data.data.productDeleteMedia.mediaUserErrors,
-                }
+                },
               );
             } else {
               logger.debug(
-                `✓ Deleted ${mediaIds.length} existing media items from product: ${product.handle}`
+                `✓ Deleted ${mediaIds.length} existing media items from product: ${product.handle}`,
               );
             }
           }
@@ -1546,7 +1560,7 @@ export async function applyProducts(
                 });
               } else {
                 logger.debug(
-                  `✓ Added ${mediaInputs.length} media items to product: ${product.handle}`
+                  `✓ Added ${mediaInputs.length} media items to product: ${product.handle}`,
                 );
               }
             }
@@ -1563,7 +1577,7 @@ export async function applyProducts(
             existingProductGid,
             product.publications,
             index,
-            product.handle
+            product.handle,
           );
           if (pubResult.synced > 0) {
             stats.publicationsSynced = (stats.publicationsSynced || 0) + 1;
@@ -1688,7 +1702,7 @@ export async function applyProducts(
             createdProductId,
             product.publications,
             index,
-            product.handle
+            product.handle,
           );
           if (pubResult.synced > 0) {
             stats.publicationsSynced = (stats.publicationsSynced || 0) + 1;
@@ -1726,25 +1740,25 @@ export async function applyProducts(
   progressBar.complete();
 
   logger.info(
-    `✓ Applied ${stats.total} products: ${stats.created} created, ${stats.updated} updated, ${stats.failed} failed`
+    `✓ Applied ${stats.total} products: ${stats.created} created, ${stats.updated} updated, ${stats.failed} failed`,
   );
   if (stats.publicationsSynced) {
     logger.info(
       `  Publications synced: ${stats.publicationsSynced} products${
         stats.publicationErrors ? ` (${stats.publicationErrors} errors)` : ""
-      }`
+      }`,
     );
   }
 
   // Phase 2: Rebuild index once and process all variants
   if (productsNeedingVariants.length > 0) {
     logger.info(
-      `Rebuilding index to process variants for ${productsNeedingVariants.length} products...`
+      `Rebuilding index to process variants for ${productsNeedingVariants.length} products...`,
     );
     index = await buildDestinationIndex(client);
 
     logger.info(
-      `Processing variants for ${productsNeedingVariants.length} products...`
+      `Processing variants for ${productsNeedingVariants.length} products...`,
     );
 
     // Create progress bar for variant processing
@@ -1752,7 +1766,7 @@ export async function applyProducts(
       productsNeedingVariants.length,
       {
         format: "Variants :bar :percent (:current/:total) :eta",
-      }
+      },
     );
 
     for (const { product, productId } of productsNeedingVariants) {
@@ -1809,7 +1823,7 @@ export async function applyProducts(
             existingVariantGid = gidForVariant(
               index,
               product.handle,
-              `pos${v.position}`
+              `pos${v.position}`,
             );
           }
 
@@ -1838,7 +1852,7 @@ export async function applyProducts(
               `Failed to update variants for product ${product.handle}`,
               {
                 error: updateResult.error.message,
-              }
+              },
             );
           } else {
             const updateResponse =
@@ -1852,7 +1866,7 @@ export async function applyProducts(
               });
             } else {
               logger.debug(
-                `✓ Updated ${variantsToUpdate.length} variants for ${product.handle}`
+                `✓ Updated ${variantsToUpdate.length} variants for ${product.handle}`,
               );
             }
           }
@@ -1873,7 +1887,7 @@ export async function applyProducts(
               `Failed to create new variants for product ${product.handle}`,
               {
                 error: createResult.error.message,
-              }
+              },
             );
           } else {
             const createResponse =
@@ -1886,11 +1900,11 @@ export async function applyProducts(
                 `Variant creation user errors for ${product.handle}`,
                 {
                   errors: createResponse.userErrors,
-                }
+                },
               );
             } else {
               logger.debug(
-                `✓ Created ${variantsToCreate.length} new variants for ${product.handle}`
+                `✓ Created ${variantsToCreate.length} new variants for ${product.handle}`,
               );
             }
           }
@@ -1907,7 +1921,7 @@ export async function applyProducts(
     variantProgressBar.complete();
 
     logger.info(
-      `✓ Processed variants for ${productsNeedingVariants.length} products`
+      `✓ Processed variants for ${productsNeedingVariants.length} products`,
     );
   }
 
@@ -1925,7 +1939,7 @@ export async function applyProducts(
 export async function applyCollections(
   client: GraphQLClient,
   inputFile: string,
-  index: DestinationIndex
+  index: DestinationIndex,
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Collections ===");
 
@@ -1959,7 +1973,7 @@ export async function applyCollections(
       const collection = JSON.parse(line) as DumpedCollection;
       const existingCollectionGid = gidForCollectionHandle(
         index,
-        collection.handle
+        collection.handle,
       );
 
       // Ensure title is not null or empty - use handle as fallback
@@ -2014,7 +2028,7 @@ export async function applyCollections(
             `Collection update user errors for ${collection.handle}`,
             {
               errors: response.userErrors,
-            }
+            },
           );
           continue;
         }
@@ -2029,7 +2043,7 @@ export async function applyCollections(
             existingCollectionGid,
             collection.publications,
             index,
-            collection.handle
+            collection.handle,
           );
           if (pubResult.synced > 0) {
             stats.publicationsSynced = (stats.publicationsSynced || 0) + 1;
@@ -2081,7 +2095,7 @@ export async function applyCollections(
             `Collection create user errors for ${collection.handle}`,
             {
               errors: response.userErrors,
-            }
+            },
           );
           continue;
         }
@@ -2098,7 +2112,7 @@ export async function applyCollections(
             createdCollectionId,
             collection.publications,
             index,
-            collection.handle
+            collection.handle,
           );
           if (pubResult.synced > 0) {
             stats.publicationsSynced = (stats.publicationsSynced || 0) + 1;
@@ -2120,13 +2134,13 @@ export async function applyCollections(
   progressBar.complete();
 
   logger.info(
-    `✓ Applied ${stats.total} collections: ${stats.created} created, ${stats.updated} updated, ${stats.failed} failed`
+    `✓ Applied ${stats.total} collections: ${stats.created} created, ${stats.updated} updated, ${stats.failed} failed`,
   );
   if (stats.publicationsSynced) {
     logger.info(
       `  Publications synced: ${stats.publicationsSynced} collections${
         stats.publicationErrors ? ` (${stats.publicationErrors} errors)` : ""
-      }`
+      }`,
     );
   }
 
@@ -2144,7 +2158,7 @@ export async function applyCollections(
 export async function applyPages(
   client: GraphQLClient,
   inputFile: string,
-  index: DestinationIndex
+  index: DestinationIndex,
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Pages ===");
 
@@ -2281,7 +2295,7 @@ export async function applyPages(
   logger.info(
     `✓ Applied ${stats.created + stats.updated} pages (${
       stats.created
-    } created, ${stats.updated} updated, ${stats.failed} failed)`
+    } created, ${stats.updated} updated, ${stats.failed} failed)`,
   );
   return ok(stats);
 }
@@ -2297,7 +2311,7 @@ export async function applyPages(
 export async function applyBlogs(
   client: GraphQLClient,
   inputFile: string,
-  index: DestinationIndex
+  index: DestinationIndex,
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Blogs ===");
 
@@ -2431,7 +2445,7 @@ export async function applyBlogs(
   logger.info(
     `✓ Applied ${stats.created + stats.updated} blogs (${
       stats.created
-    } created, ${stats.updated} updated, ${stats.failed} failed)`
+    } created, ${stats.updated} updated, ${stats.failed} failed)`,
   );
   return ok(stats);
 }
@@ -2447,7 +2461,7 @@ export async function applyBlogs(
 export async function applyArticles(
   client: GraphQLClient,
   inputFile: string,
-  index: DestinationIndex
+  index: DestinationIndex,
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Articles ===");
 
@@ -2488,7 +2502,7 @@ export async function applyArticles(
           error: `Blog not found: ${article.blogHandle}`,
         });
         logger.warn(
-          `Cannot create article ${article.handle} - blog ${article.blogHandle} not found`
+          `Cannot create article ${article.handle} - blog ${article.blogHandle} not found`,
         );
         continue;
       }
@@ -2496,7 +2510,7 @@ export async function applyArticles(
       const existingGid = gidForArticle(
         index,
         article.blogHandle,
-        article.handle
+        article.handle,
       );
 
       if (existingGid) {
@@ -2536,7 +2550,7 @@ export async function applyArticles(
             `Failed to update article ${article.blogHandle}:${article.handle}`,
             {
               error: result.error.message,
-            }
+            },
           );
           continue;
         }
@@ -2555,14 +2569,14 @@ export async function applyArticles(
             `Article update user errors for ${article.blogHandle}:${article.handle}`,
             {
               errors: response.userErrors,
-            }
+            },
           );
           continue;
         }
 
         stats.updated++;
         logger.debug(
-          `✓ Updated article: ${article.blogHandle}:${article.handle}`
+          `✓ Updated article: ${article.blogHandle}:${article.handle}`,
         );
       } else {
         // Article doesn't exist - create it
@@ -2600,7 +2614,7 @@ export async function applyArticles(
             `Failed to create article ${article.blogHandle}:${article.handle}`,
             {
               error: result.error.message,
-            }
+            },
           );
           continue;
         }
@@ -2619,7 +2633,7 @@ export async function applyArticles(
             `Article create user errors for ${article.blogHandle}:${article.handle}`,
             {
               errors: response.userErrors,
-            }
+            },
           );
           continue;
         }
@@ -2633,7 +2647,7 @@ export async function applyArticles(
         }
 
         logger.debug(
-          `✓ Created article: ${article.blogHandle}:${article.handle}`
+          `✓ Created article: ${article.blogHandle}:${article.handle}`,
         );
       }
     } catch (error) {
@@ -2649,7 +2663,7 @@ export async function applyArticles(
   logger.info(
     `✓ Applied ${stats.created + stats.updated} articles (${
       stats.created
-    } created, ${stats.updated} updated, ${stats.failed} failed)`
+    } created, ${stats.updated} updated, ${stats.failed} failed)`,
   );
   return ok(stats);
 }
@@ -2685,7 +2699,7 @@ export interface ApplyOptions {
 export async function applyAllData(
   client: GraphQLClient,
   inputDir: string,
-  options: ApplyOptions = {}
+  options: ApplyOptions = {},
 ): Promise<
   Result<
     {
@@ -2744,7 +2758,7 @@ export async function applyAllData(
       client,
       productsFile,
       index,
-      fileIndex
+      fileIndex,
     );
     if (!productsResult.ok) {
       logger.warn("Products apply failed, continuing...");
@@ -2850,7 +2864,7 @@ export async function applyAllData(
       client,
       inputDir,
       index,
-      fileIndex
+      fileIndex,
     );
     if (!metaobjectsResult.ok) {
       return err(metaobjectsResult.error);
@@ -2887,7 +2901,7 @@ export async function applyAllData(
       const productMfResult = await applyProductMetafields(
         client,
         productsFile,
-        finalIndex
+        finalIndex,
       );
       if (productMfResult.ok) {
         const stats = productMfResult.data;
@@ -2904,7 +2918,7 @@ export async function applyAllData(
       const collectionMfResult = await applyCollectionMetafields(
         client,
         collectionsFile,
-        finalIndex
+        finalIndex,
       );
       if (collectionMfResult.ok) {
         const stats = collectionMfResult.data;
@@ -2921,7 +2935,7 @@ export async function applyAllData(
       const pageMfResult = await applyPageMetafields(
         client,
         pagesFile,
-        finalIndex
+        finalIndex,
       );
       if (pageMfResult.ok) {
         const stats = pageMfResult.data;
@@ -2938,7 +2952,7 @@ export async function applyAllData(
       const shopMfResult = await applyShopMetafields(
         client,
         shopMetafieldsFile,
-        finalIndex
+        finalIndex,
       );
       if (shopMfResult.ok) {
         const stats = shopMfResult.data;

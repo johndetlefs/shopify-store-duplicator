@@ -12,6 +12,7 @@
 import { logger } from "../utils/logger.js";
 import { type GraphQLClient } from "../graphql/client.js";
 import {
+  METAOBJECT_DEFINITIONS_QUERY,
   PRODUCTS_HANDLES_QUERY,
   PRODUCTS_WITH_VARIANTS_QUERY,
   COLLECTIONS_HANDLES_QUERY,
@@ -38,7 +39,7 @@ export interface DestinationIndex {
  * This allows us to resolve references deterministically when applying data.
  */
 export async function buildDestinationIndex(
-  client: GraphQLClient
+  client: GraphQLClient,
 ): Promise<DestinationIndex> {
   logger.info("Building destination index");
 
@@ -61,7 +62,7 @@ export async function buildDestinationIndex(
     {
       getEdges: (data) => data.products.edges,
       getPageInfo: (data) => data.products.pageInfo,
-    }
+    },
   )) {
     if (product.handle) {
       index.products.set(product.handle, product.id);
@@ -78,7 +79,7 @@ export async function buildDestinationIndex(
     {
       getEdges: (data) => data.products.edges,
       getPageInfo: (data) => data.products.pageInfo,
-    }
+    },
   )) {
     if (!product.handle || !product.variants?.edges) continue;
 
@@ -113,7 +114,7 @@ export async function buildDestinationIndex(
     {
       getEdges: (data) => data.collections.edges,
       getPageInfo: (data) => data.collections.pageInfo,
-    }
+    },
   )) {
     if (collection.handle) {
       index.collections.set(collection.handle, collection.id);
@@ -129,7 +130,7 @@ export async function buildDestinationIndex(
     {
       getEdges: (data) => data.pages.edges,
       getPageInfo: (data) => data.pages.pageInfo,
-    }
+    },
   )) {
     if (page.handle) {
       index.pages.set(page.handle, page.id);
@@ -145,7 +146,7 @@ export async function buildDestinationIndex(
     {
       getEdges: (data) => data.blogs.edges,
       getPageInfo: (data) => data.blogs.pageInfo,
-    }
+    },
   )) {
     if (blog.handle) {
       index.blogs.set(blog.handle, blog.id);
@@ -161,7 +162,7 @@ export async function buildDestinationIndex(
     {
       getEdges: (data) => data.articles.edges,
       getPageInfo: (data) => data.articles.pageInfo,
-    }
+    },
   )) {
     if (article.handle && article.blog?.handle) {
       const key = `${article.blog.handle}:${article.handle}`;
@@ -169,6 +170,27 @@ export async function buildDestinationIndex(
     }
   }
   logger.debug(`Indexed ${index.articles.size} articles`);
+
+  // Index all metaobjects by enumerating types from definitions
+  logger.debug("Indexing metaobjects");
+  const metaobjectTypes = new Set<string>();
+  for await (const definition of client.paginate(
+    METAOBJECT_DEFINITIONS_QUERY,
+    {},
+    {
+      getEdges: (data) => data.metaobjectDefinitions.edges,
+      getPageInfo: (data) => data.metaobjectDefinitions.pageInfo,
+    },
+  )) {
+    if (definition.type) {
+      metaobjectTypes.add(definition.type);
+    }
+  }
+
+  for (const type of metaobjectTypes) {
+    await indexMetaobjectType(client, type, index);
+  }
+  logger.debug(`Indexed ${index.metaobjects.size} metaobjects`);
 
   // Index publications (sales channels)
   logger.debug("Indexing publications");
@@ -178,7 +200,7 @@ export async function buildDestinationIndex(
     {
       getEdges: (data) => data.publications.edges,
       getPageInfo: (data) => data.publications.pageInfo,
-    }
+    },
   )) {
     if (publication.name) {
       index.publications.set(publication.name, publication.id);
@@ -193,6 +215,7 @@ export async function buildDestinationIndex(
     pages: index.pages.size,
     blogs: index.blogs.size,
     articles: index.articles.size,
+    metaobjects: index.metaobjects.size,
     publications: index.publications.size,
   });
 
@@ -206,7 +229,7 @@ export async function buildDestinationIndex(
 export async function indexMetaobjectType(
   client: GraphQLClient,
   type: string,
-  index: DestinationIndex
+  index: DestinationIndex,
 ): Promise<void> {
   logger.debug(`Indexing metaobjects of type: ${type}`);
 
@@ -216,7 +239,7 @@ export async function indexMetaobjectType(
     {
       getEdges: (data) => data.metaobjects.edges,
       getPageInfo: (data) => data.metaobjects.pageInfo,
-    }
+    },
   )) {
     if (metaobject.handle && metaobject.type) {
       const key = `${metaobject.type}:${metaobject.handle}`;
@@ -225,7 +248,7 @@ export async function indexMetaobjectType(
   }
 
   const count = Array.from(index.metaobjects.keys()).filter((k) =>
-    k.startsWith(`${type}:`)
+    k.startsWith(`${type}:`),
   ).length;
   logger.debug(`Indexed ${count} metaobjects of type ${type}`);
 }
@@ -235,7 +258,7 @@ export async function indexMetaobjectType(
  */
 export function gidForProductHandle(
   index: DestinationIndex,
-  handle: string
+  handle: string,
 ): string | undefined {
   return index.products.get(handle);
 }
@@ -245,7 +268,7 @@ export function gidForProductHandle(
  */
 export function gidForCollectionHandle(
   index: DestinationIndex,
-  handle: string
+  handle: string,
 ): string | undefined {
   return index.collections.get(handle);
 }
@@ -255,7 +278,7 @@ export function gidForCollectionHandle(
  */
 export function gidForPageHandle(
   index: DestinationIndex,
-  handle: string
+  handle: string,
 ): string | undefined {
   return index.pages.get(handle);
 }
@@ -265,7 +288,7 @@ export function gidForPageHandle(
  */
 export function gidForBlogHandle(
   index: DestinationIndex,
-  handle: string
+  handle: string,
 ): string | undefined {
   return index.blogs.get(handle);
 }
@@ -276,7 +299,7 @@ export function gidForBlogHandle(
 export function gidForArticle(
   index: DestinationIndex,
   blogHandle: string,
-  articleHandle: string
+  articleHandle: string,
 ): string | undefined {
   const key = `${blogHandle}:${articleHandle}`;
   return index.articles.get(key);
@@ -288,7 +311,7 @@ export function gidForArticle(
 export function gidForMetaobject(
   index: DestinationIndex,
   type: string,
-  handle: string
+  handle: string,
 ): string | undefined {
   const key = `${type}:${handle}`;
   return index.metaobjects.get(key);
@@ -300,7 +323,7 @@ export function gidForMetaobject(
 export function gidForVariant(
   index: DestinationIndex,
   productHandle: string,
-  skuOrPosition: string | number
+  skuOrPosition: string | number,
 ): string | undefined {
   const key = `${productHandle}:${skuOrPosition}`;
   return index.variants.get(key);
@@ -313,7 +336,7 @@ export function gidForVariant(
 export function resolveReference(
   index: DestinationIndex,
   refType: string,
-  naturalKey: string
+  naturalKey: string,
 ): string | undefined {
   switch (refType) {
     case "Product":
@@ -354,7 +377,7 @@ export function resolveReference(
  * This is used when processing dumped data to build the natural key for resolution.
  */
 export function extractNaturalKey(
-  ref: any
+  ref: any,
 ): { type: string; key: string } | undefined {
   if (!ref || !ref.__typename) return undefined;
 

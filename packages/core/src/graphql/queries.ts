@@ -298,6 +298,9 @@ export const PRODUCTS_BULK = `
           title
           descriptionHtml
           status
+          category {
+            id
+          }
           vendor
           productType
           tags
@@ -349,6 +352,22 @@ export const PRODUCTS_BULK = `
                   ... on Collection {
                     id
                     handle
+                  }
+                  ... on MediaImage {
+                    id
+                    image {
+                      url
+                    }
+                  }
+                  ... on GenericFile {
+                    id
+                    url
+                  }
+                  ... on Video {
+                    id
+                    sources {
+                      url
+                    }
                   }
                 }
               }
@@ -1283,9 +1302,16 @@ export const GET_PRODUCT_MEDIA = `
         edges {
           node {
             id
+            __typename
             ... on MediaImage {
               alt
               image {
+                url
+              }
+            }
+            ... on Video {
+              alt
+              sources {
                 url
               }
             }
@@ -1360,12 +1386,56 @@ export const COLLECTION_UPDATE = `
   }
 `;
 
+export const COLLECTION_PRODUCTS_QUERY = `
+  query collectionProducts($id: ID!, $first: Int!, $after: String) {
+    collection(id: $id) {
+      id
+      products(first: $first, after: $after) {
+        edges {
+          node {
+            id
+            handle
+          }
+          cursor
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+`;
+
+export const COLLECTION_ADD_PRODUCTS = `
+  mutation collectionAddProducts($id: ID!, $productIds: [ID!]!) {
+    collectionAddProducts(id: $id, productIds: $productIds) {
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+export const COLLECTION_REMOVE_PRODUCTS = `
+  mutation collectionRemoveProducts($id: ID!, $productIds: [ID!]!) {
+    collectionRemoveProducts(id: $id, productIds: $productIds) {
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
 /**
  * Resolve GIDs to handles for list-type metafield references
  */
 export const RESOLVE_NODES_QUERY = `
   query resolveNodes($ids: [ID!]!) {
     nodes(ids: $ids) {
+      __typename
       ... on Product {
         id
         handle

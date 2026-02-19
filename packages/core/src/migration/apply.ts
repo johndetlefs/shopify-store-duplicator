@@ -45,6 +45,9 @@ import {
   PRODUCT_VARIANT_BULK_UPDATE,
   COLLECTION_CREATE,
   COLLECTION_UPDATE,
+  COLLECTION_PRODUCTS_QUERY,
+  COLLECTION_ADD_PRODUCTS,
+  COLLECTION_REMOVE_PRODUCTS,
 } from "../graphql/queries.js";
 import { applyFiles, type FileIndex } from "../files/apply.js";
 import { relinkMetaobjects } from "../files/relink.js";
@@ -114,11 +117,14 @@ interface DumpedMetafield {
   refMetaobject?: { type: string; handle: string };
   refProduct?: { handle: string };
   refCollection?: { handle: string };
+  refFile?: { url: string };
   refList?: Array<{
     type: string;
     metaobjectHandle?: string;
     metaobjectType?: string;
     productHandle?: string;
+    fileUrl?: string;
+    fileGid?: string;
   }>;
 }
 
@@ -128,6 +134,7 @@ interface DumpedProduct {
   title: string;
   descriptionHtml?: string;
   status: string;
+  categoryId?: string;
   vendor?: string;
   productType?: string;
   tags?: string[];
@@ -191,6 +198,7 @@ interface DumpedCollection {
   title: string;
   descriptionHtml?: string;
   ruleSet?: any; // Collection rules for automated collections
+  productHandles?: string[];
   publications?: Array<{
     node: {
       publication: {
@@ -202,6 +210,133 @@ interface DumpedCollection {
     };
   }>;
   metafields: DumpedMetafield[];
+}
+
+async function syncCollectionProducts(
+  client: GraphQLClient,
+  collectionId: string,
+  collectionHandle: string,
+  sourceProductHandles: string[] | undefined,
+  index: DestinationIndex,
+): Promise<void> {
+  if (!sourceProductHandles) return;
+
+  const currentByHandle = new Map<string, string>();
+  let hasNextPage = true;
+  let cursor: string | undefined;
+
+  while (hasNextPage) {
+    const currentResult = await client.request<{
+      collection: {
+        products: {
+          edges: Array<{ node: { id: string; handle: string } }>;
+          pageInfo: { hasNextPage: boolean; endCursor?: string };
+        };
+      };
+    }>({
+      query: COLLECTION_PRODUCTS_QUERY,
+      variables: { id: collectionId, first: 250, after: cursor },
+    });
+
+    if (!currentResult.ok) {
+      logger.warn(
+        `Failed to read products for collection ${collectionHandle}`,
+        {
+          error: currentResult.error.message,
+        },
+      );
+      return;
+    }
+
+    const products = currentResult.data.data?.collection?.products;
+    if (!products) break;
+
+    for (const edge of products.edges || []) {
+      const node = edge.node;
+      if (node?.handle && node?.id) {
+        currentByHandle.set(node.handle, node.id);
+      }
+    }
+
+    hasNextPage = products.pageInfo.hasNextPage;
+    cursor = products.pageInfo.endCursor;
+  }
+
+  const targetHandles = new Set(sourceProductHandles);
+  const targetIds = new Set<string>();
+  for (const handle of targetHandles) {
+    const gid = gidForProductHandle(index, handle);
+    if (gid) {
+      targetIds.add(gid);
+    } else {
+      logger.warn(`Collection source product not found in destination index`, {
+        collectionHandle,
+        productHandle: handle,
+      });
+    }
+  }
+
+  const currentIds = new Set(currentByHandle.values());
+  const toAdd = Array.from(targetIds).filter((id) => !currentIds.has(id));
+  const toRemove = Array.from(currentByHandle.entries())
+    .filter(([handle]) => !targetHandles.has(handle))
+    .map(([, id]) => id);
+
+  for (const chunk of chunkArray(toAdd, 100)) {
+    const addResult = await client.request({
+      query: COLLECTION_ADD_PRODUCTS,
+      variables: { id: collectionId, productIds: chunk },
+    });
+    if (!addResult.ok) {
+      logger.warn(`Failed adding products to collection ${collectionHandle}`, {
+        error: addResult.error.message,
+      });
+      continue;
+    }
+    const userErrors =
+      addResult.data.data?.collectionAddProducts?.userErrors || [];
+    if (userErrors.length > 0) {
+      logger.warn(
+        `Collection add products user errors for ${collectionHandle}`,
+        {
+          errors: userErrors,
+        },
+      );
+    }
+  }
+
+  for (const chunk of chunkArray(toRemove, 100)) {
+    const removeResult = await client.request({
+      query: COLLECTION_REMOVE_PRODUCTS,
+      variables: { id: collectionId, productIds: chunk },
+    });
+    if (!removeResult.ok) {
+      logger.warn(
+        `Failed removing products from collection ${collectionHandle}`,
+        {
+          error: removeResult.error.message,
+        },
+      );
+      continue;
+    }
+    const userErrors =
+      removeResult.data.data?.collectionRemoveProducts?.userErrors || [];
+    if (userErrors.length > 0) {
+      logger.warn(
+        `Collection remove products user errors for ${collectionHandle}`,
+        {
+          errors: userErrors,
+        },
+      );
+    }
+  }
+
+  if (toAdd.length > 0 || toRemove.length > 0) {
+    logger.debug(`Synced products for collection ${collectionHandle}`, {
+      added: toAdd.length,
+      removed: toRemove.length,
+    });
+  }
 }
 
 interface DumpedPage {
@@ -419,9 +554,37 @@ function buildFieldValue(
 function buildMetafieldValue(
   mf: DumpedMetafield,
   index: DestinationIndex,
+  fileIndex?: FileIndex,
 ): string | null {
   // If there's a single reference, remap it
-  if (mf.refMetaobject || mf.refProduct || mf.refCollection) {
+  if (mf.refMetaobject || mf.refProduct || mf.refCollection || mf.refFile) {
+    if (mf.refFile) {
+      if (typeof mf.value === "string" && mf.value.startsWith("gid://")) {
+        const mappedByGid = fileIndex?.gidToGid.get(mf.value);
+        if (mappedByGid) {
+          return mappedByGid;
+        }
+      }
+
+      if (mf.refFile.url) {
+        const mappedByUrl = fileIndex?.urlToGid.get(mf.refFile.url);
+        if (mappedByUrl) {
+          return mappedByUrl;
+        }
+      }
+
+      logger.warn(
+        "Skipping file metafield with invalid reference (destination file not found)",
+        {
+          namespace: mf.namespace,
+          key: mf.key,
+          value: mf.value,
+          fileUrl: mf.refFile.url,
+        },
+      );
+      return null;
+    }
+
     const gid = remapMetafieldReference(mf, index);
     if (!gid) {
       logger.warn(
@@ -455,6 +618,10 @@ function buildMetafieldValue(
         gid = gidForMetaobject(index, ref.metaobjectType, ref.metaobjectHandle);
       } else if (ref.productHandle) {
         gid = gidForProductHandle(index, ref.productHandle);
+      } else if (ref.fileGid) {
+        gid = fileIndex?.gidToGid.get(ref.fileGid) || ref.fileGid;
+      } else if (ref.fileUrl) {
+        gid = fileIndex?.urlToGid.get(ref.fileUrl);
       }
 
       if (gid) {
@@ -845,6 +1012,7 @@ export async function applyProductMetafields(
   client: GraphQLClient,
   inputFile: string,
   index: DestinationIndex,
+  fileIndex?: FileIndex,
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Product Metafields ===");
 
@@ -885,9 +1053,39 @@ export async function applyProductMetafields(
         continue;
       }
 
+      // Ensure category parity for owner-subtype constrained metafields.
+      if (product.categoryId) {
+        const categorySyncResult = await client.request({
+          query: PRODUCT_UPDATE,
+          variables: {
+            product: {
+              id: productGid,
+              category: product.categoryId,
+            },
+          },
+        });
+
+        if (!categorySyncResult.ok) {
+          logger.warn(`Failed category sync for product ${product.handle}`, {
+            error: categorySyncResult.error.message,
+          });
+        } else {
+          const categoryUserErrors =
+            categorySyncResult.data.data?.productUpdate?.userErrors || [];
+          if (categoryUserErrors.length > 0) {
+            logger.warn(
+              `Category sync user errors for product ${product.handle}`,
+              {
+                errors: categoryUserErrors,
+              },
+            );
+          }
+        }
+      }
+
       // Product-level metafields
       for (const mf of product.metafields) {
-        const value = buildMetafieldValue(mf, index);
+        const value = buildMetafieldValue(mf, index, fileIndex);
         if (value !== null) {
           allMetafields.push({
             namespace: mf.namespace,
@@ -910,7 +1108,7 @@ export async function applyProductMetafields(
         }
 
         for (const mf of variant.metafields) {
-          const value = buildMetafieldValue(mf, index);
+          const value = buildMetafieldValue(mf, index, fileIndex);
           if (value !== null) {
             allMetafields.push({
               namespace: mf.namespace,
@@ -969,8 +1167,31 @@ export async function applyProductMetafields(
         response.userErrors.forEach((e: any) => {
           stats.errors.push({ error: e.message });
         });
+
+        const detailedErrors = response.userErrors.map((e: any) => {
+          const rawIndex = Array.isArray(e.field) ? e.field[1] : undefined;
+          const index =
+            typeof rawIndex === "string" || typeof rawIndex === "number"
+              ? Number(rawIndex)
+              : NaN;
+          const failedInput = Number.isInteger(index)
+            ? chunk[index]
+            : undefined;
+          return {
+            ...e,
+            metafield: failedInput
+              ? {
+                  namespace: failedInput.namespace,
+                  key: failedInput.key,
+                  type: failedInput.type,
+                  ownerId: failedInput.ownerId,
+                }
+              : undefined,
+          };
+        });
+
         logger.warn("Metafields batch had user errors", {
-          errors: response.userErrors,
+          errors: detailedErrors,
         });
       }
 
@@ -998,6 +1219,7 @@ export async function applyCollectionMetafields(
   client: GraphQLClient,
   inputFile: string,
   index: DestinationIndex,
+  fileIndex?: FileIndex,
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Collection Metafields ===");
 
@@ -1040,7 +1262,7 @@ export async function applyCollectionMetafields(
       }
 
       for (const mf of collection.metafields) {
-        const value = buildMetafieldValue(mf, index);
+        const value = buildMetafieldValue(mf, index, fileIndex);
         if (value !== null) {
           allMetafields.push({
             namespace: mf.namespace,
@@ -1124,6 +1346,7 @@ export async function applyPageMetafields(
   client: GraphQLClient,
   inputFile: string,
   index: DestinationIndex,
+  fileIndex?: FileIndex,
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Page Metafields ===");
 
@@ -1164,7 +1387,7 @@ export async function applyPageMetafields(
       }
 
       for (const mf of page.metafields) {
-        const value = buildMetafieldValue(mf, index);
+        const value = buildMetafieldValue(mf, index, fileIndex);
         if (value !== null) {
           allMetafields.push({
             namespace: mf.namespace,
@@ -1247,6 +1470,7 @@ export async function applyShopMetafields(
   client: GraphQLClient,
   inputFile: string,
   index: DestinationIndex,
+  fileIndex?: FileIndex,
 ): Promise<Result<ApplyStats, Error>> {
   logger.info("=== Applying Shop Metafields ===");
 
@@ -1292,7 +1516,7 @@ export async function applyShopMetafields(
   for (const line of lines) {
     try {
       const mf = JSON.parse(line) as DumpedMetafield;
-      const value = buildMetafieldValue(mf, index);
+      const value = buildMetafieldValue(mf, index, fileIndex);
       if (value !== null) {
         allMetafields.push({
           namespace: mf.namespace,
@@ -1432,6 +1656,10 @@ export async function applyProducts(
           status: product.status || "ACTIVE",
         };
 
+        if (product.categoryId) {
+          updateInput.category = product.categoryId;
+        }
+
         const result = await client.request({
           query: PRODUCT_UPDATE,
           variables: {
@@ -1464,13 +1692,10 @@ export async function applyProducts(
           continue;
         }
 
-        // Update media separately if present (idempotent: delete existing, then add)
+        // Update media separately if present (non-destructive: add missing only)
         if (product.media && product.media.length > 0 && fileIndex) {
-          const {
-            PRODUCT_CREATE_MEDIA,
-            PRODUCT_DELETE_MEDIA,
-            GET_PRODUCT_MEDIA,
-          } = await import("../graphql/queries.js");
+          const { PRODUCT_CREATE_MEDIA, GET_PRODUCT_MEDIA } =
+            await import("../graphql/queries.js");
 
           // Step 1: Query existing media
           const existingMediaResult = await client.request({
@@ -1478,63 +1703,55 @@ export async function applyProducts(
             variables: { id: existingProductGid },
           });
 
-          // Step 2: Delete existing media if any
-          if (
-            existingMediaResult.ok &&
-            existingMediaResult.data.data?.product?.media?.edges?.length > 0
-          ) {
-            const mediaIds =
-              existingMediaResult.data.data.product.media.edges.map(
-                (edge: any) => edge.node.id,
-              );
+          const normalizeMediaUrl = (url: string): string => {
+            try {
+              const parsed = new URL(url);
+              parsed.search = "";
+              parsed.hash = "";
+              return parsed.toString();
+            } catch {
+              return url.split("?")[0].split("#")[0];
+            }
+          };
 
-            const deleteResult = await client.request({
-              query: PRODUCT_DELETE_MEDIA,
-              variables: {
-                productId: existingProductGid,
-                mediaIds: mediaIds,
-              },
-            });
-
-            if (!deleteResult.ok) {
-              logger.warn(
-                `Failed to delete existing media for product ${product.handle}`,
-                { error: deleteResult.error.message },
-              );
-            } else if (
-              deleteResult.data.data?.productDeleteMedia?.mediaUserErrors
-                ?.length > 0
-            ) {
-              logger.warn(
-                `Media deletion warnings for product ${product.handle}`,
-                {
-                  errors:
-                    deleteResult.data.data.productDeleteMedia.mediaUserErrors,
-                },
-              );
-            } else {
-              logger.debug(
-                `✓ Deleted ${mediaIds.length} existing media items from product: ${product.handle}`,
-              );
+          const existingMediaUrls = new Set<string>();
+          if (existingMediaResult.ok) {
+            const edges =
+              existingMediaResult.data.data?.product?.media?.edges || [];
+            for (const edge of edges) {
+              const node = edge.node;
+              const imageUrl = node?.image?.url;
+              const videoSourceUrl = node?.sources?.[0]?.url;
+              if (imageUrl) existingMediaUrls.add(normalizeMediaUrl(imageUrl));
+              if (videoSourceUrl)
+                existingMediaUrls.add(normalizeMediaUrl(videoSourceUrl));
             }
           }
 
-          // Step 3: Add new media
-          const mediaInputs = product.media
-            .map((m) => {
-              // Use destination URL for productCreateMedia (not GID)
-              const destUrl = fileIndex.gidToUrl.get(m.id);
-              if (destUrl) {
-                return {
-                  mediaContentType:
-                    m.mediaType === "MediaImage" ? "IMAGE" : "VIDEO",
-                  alt: m.alt || "",
-                  originalSource: destUrl,
-                };
-              }
-              return null;
-            })
-            .filter((m) => m !== null);
+          // Step 2: Add only media URLs that are missing on destination
+          const mediaInputs: Array<{
+            mediaContentType: "IMAGE" | "VIDEO";
+            alt: string;
+            originalSource: string;
+          }> = [];
+          const queuedMediaUrls = new Set<string>();
+
+          for (const m of product.media) {
+            const destUrl = fileIndex.gidToUrl.get(m.id);
+            if (!destUrl) continue;
+
+            const normalizedUrl = normalizeMediaUrl(destUrl);
+            if (existingMediaUrls.has(normalizedUrl)) continue;
+            if (queuedMediaUrls.has(normalizedUrl)) continue;
+
+            mediaInputs.push({
+              mediaContentType:
+                m.mediaType === "MediaImage" ? "IMAGE" : "VIDEO",
+              alt: m.alt || "",
+              originalSource: destUrl,
+            });
+            queuedMediaUrls.add(normalizedUrl);
+          }
 
           if (mediaInputs.length > 0) {
             const mediaResult = await client.request({
@@ -1564,6 +1781,10 @@ export async function applyProducts(
                 );
               }
             }
+          } else {
+            logger.debug(
+              `No new media to add for product: ${product.handle} (existing media preserved)`,
+            );
           }
         }
 
@@ -1610,6 +1831,10 @@ export async function applyProducts(
           descriptionHtml: product.descriptionHtml || "",
           status: product.status || "ACTIVE",
         };
+
+        if (product.categoryId) {
+          productInput.category = product.categoryId;
+        }
 
         // Add optional fields if present
         if (product.vendor) productInput.vendor = product.vendor;
@@ -2052,6 +2277,17 @@ export async function applyCollections(
             stats.publicationErrors = (stats.publicationErrors || 0) + 1;
           }
         }
+
+        // Sync manual collection product memberships
+        if (!collection.ruleSet) {
+          await syncCollectionProducts(
+            client,
+            existingCollectionGid,
+            collection.handle,
+            collection.productHandles,
+            index,
+          );
+        }
       } else {
         // Collection doesn't exist - create it
         const createInput: any = {
@@ -2120,6 +2356,17 @@ export async function applyCollections(
           if (pubResult.errors.length > 0) {
             stats.publicationErrors = (stats.publicationErrors || 0) + 1;
           }
+        }
+
+        // Sync manual collection product memberships
+        if (createdCollectionId && !collection.ruleSet) {
+          await syncCollectionProducts(
+            client,
+            createdCollectionId,
+            collection.handle,
+            collection.productHandles,
+            index,
+          );
         }
       }
     } catch (err) {
@@ -2737,7 +2984,7 @@ export async function applyAllData(
     gidToGid: new Map(),
     gidToUrl: new Map(),
   };
-  if (applyAll || options.metaobjectsOnly) {
+  if (applyAll || options.metaobjectsOnly || options.productMetafieldsOnly) {
     logger.info("Step 2: Applying files...");
     const filesFile = path.join(inputDir, "files.jsonl");
     const filesResult = await applyFiles(client, filesFile);
@@ -2880,6 +3127,11 @@ export async function applyAllData(
     });
   }
 
+  if (applyAll || options.metaobjectsOnly) {
+    logger.info("Rebuilding index after metaobject apply...");
+    index = await buildDestinationIndex(client);
+  }
+
   const finalIndex = index;
 
   // Step 9: Apply metafields (to all resources)
@@ -2902,6 +3154,7 @@ export async function applyAllData(
         client,
         productsFile,
         finalIndex,
+        fileIndex,
       );
       if (productMfResult.ok) {
         const stats = productMfResult.data;
@@ -2919,6 +3172,7 @@ export async function applyAllData(
         client,
         collectionsFile,
         finalIndex,
+        fileIndex,
       );
       if (collectionMfResult.ok) {
         const stats = collectionMfResult.data;
@@ -2936,6 +3190,7 @@ export async function applyAllData(
         client,
         pagesFile,
         finalIndex,
+        fileIndex,
       );
       if (pageMfResult.ok) {
         const stats = pageMfResult.data;
@@ -2953,6 +3208,7 @@ export async function applyAllData(
         client,
         shopMetafieldsFile,
         finalIndex,
+        fileIndex,
       );
       if (shopMfResult.ok) {
         const stats = shopMfResult.data;

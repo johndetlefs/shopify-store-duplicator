@@ -22,6 +22,7 @@ import {
   METAOBJECTS_BY_TYPE_BULK,
   PRODUCTS_BULK,
   COLLECTIONS_BULK,
+  COLLECTION_PRODUCTS_QUERY,
   PAGES_BULK,
   SHOP_BULK,
   BLOGS_BULK,
@@ -64,6 +65,8 @@ interface Reference {
   sku?: string; // for ProductVariant
   productHandle?: string; // for ProductVariant
   url?: string; // for files
+  image?: { url?: string }; // for MediaImage
+  sources?: Array<{ url?: string }>; // for Video
 }
 
 interface PublicationEdge {
@@ -200,6 +203,7 @@ interface DumpedProduct {
   title: string;
   descriptionHtml?: string;
   status: string;
+  categoryId?: string;
   vendor?: string;
   productType?: string;
   tags?: string[];
@@ -266,6 +270,7 @@ interface DumpedMetafield {
   refMetaobject?: { type: string; handle: string };
   refProduct?: { handle: string };
   refCollection?: { handle: string };
+  refFile?: { url: string };
   refList?: Array<{
     type: string;
     metaobjectHandle?: string;
@@ -284,6 +289,7 @@ interface DumpedCollection {
   title: string;
   descriptionHtml?: string;
   ruleSet?: any; // Collection rules for automated collections
+  productHandles?: string[];
   publications?: Array<{
     node: {
       publication: {
@@ -373,8 +379,11 @@ function extractReferenceKey(ref: Reference | undefined): Partial<DumpedField> {
     case "MediaImage":
     case "Video":
     case "GenericFile":
-      if (ref.url) {
-        field.refFile = { url: ref.url };
+      {
+        const fileUrl = ref.url || ref.image?.url || ref.sources?.[0]?.url;
+        if (fileUrl) {
+          field.refFile = { url: fileUrl };
+        }
       }
       break;
     // TaxonomyValue and other types don't have natural keys - we keep them as GIDs
@@ -475,7 +484,7 @@ function transformMetaobjectField(field: MetaobjectField): DumpedField {
         `Failed to parse list reference value for field ${field.key}`,
         {
           value: field.value?.substring(0, 100),
-        }
+        },
       );
     }
   }
@@ -488,7 +497,7 @@ function transformMetaobjectField(field: MetaobjectField): DumpedField {
  */
 async function resolveListReferences(
   client: GraphQLClient,
-  gids: string[]
+  gids: string[],
 ): Promise<DumpedField["refList"]> {
   if (gids.length === 0) return [];
 
@@ -557,7 +566,7 @@ async function resolveListReferences(
  */
 async function batchResolveListGids(
   client: GraphQLClient,
-  gids: Set<string>
+  gids: Set<string>,
 ): Promise<Map<string, NonNullable<DumpedField["refList"]>[number]>> {
   type RefListItem = NonNullable<DumpedField["refList"]>[number];
   const gidToNaturalKey = new Map<string, RefListItem>();
@@ -568,7 +577,7 @@ async function batchResolveListGids(
   const gidsArray = Array.from(gids);
 
   logger.info(
-    `Batch resolving ${gidsArray.length} list-type metafield references...`
+    `Batch resolving ${gidsArray.length} list-type metafield references...`,
   );
 
   // Process in chunks of 250 (Shopify limit for nodes query)
@@ -642,7 +651,7 @@ async function batchResolveListGids(
  */
 async function transformMetafield(
   mf: MetafieldEdge["node"],
-  client?: GraphQLClient
+  client?: GraphQLClient,
 ): Promise<DumpedMetafield> {
   const dumped: DumpedMetafield = {
     namespace: mf.namespace,
@@ -657,6 +666,7 @@ async function transformMetafield(
     if (refKeys.refMetaobject) dumped.refMetaobject = refKeys.refMetaobject;
     if (refKeys.refProduct) dumped.refProduct = refKeys.refProduct;
     if (refKeys.refCollection) dumped.refCollection = refKeys.refCollection;
+    if (refKeys.refFile) dumped.refFile = refKeys.refFile;
   }
 
   // List of references - check if value is JSON array of GIDs
@@ -666,7 +676,7 @@ async function transformMetafield(
       if (
         Array.isArray(parsed) &&
         parsed.every(
-          (item) => typeof item === "string" && item.startsWith("gid://")
+          (item) => typeof item === "string" && item.startsWith("gid://"),
         )
       ) {
         // Resolve the GIDs to handles
@@ -708,6 +718,7 @@ function transformMetafieldSync(mf: MetafieldEdge["node"]): DumpedMetafield {
     if (refKeys.refMetaobject) dumped.refMetaobject = refKeys.refMetaobject;
     if (refKeys.refProduct) dumped.refProduct = refKeys.refProduct;
     if (refKeys.refCollection) dumped.refCollection = refKeys.refCollection;
+    if (refKeys.refFile) dumped.refFile = refKeys.refFile;
   }
 
   // List of references
@@ -727,7 +738,7 @@ function transformMetafieldSync(mf: MetafieldEdge["node"]): DumpedMetafield {
  * Dump all metaobject definitions to get list of types
  */
 async function getMetaobjectTypes(
-  client: GraphQLClient
+  client: GraphQLClient,
 ): Promise<Result<string[], Error>> {
   logger.info("Fetching metaobject definitions to determine types...");
 
@@ -759,7 +770,7 @@ async function getMetaobjectTypes(
     }
 
     types.push(
-      ...defs.edges.map((e: { node: MetaobjectDefinitionNode }) => e.node.type)
+      ...defs.edges.map((e: { node: MetaobjectDefinitionNode }) => e.node.type),
     );
     hasNextPage = defs.pageInfo.hasNextPage;
     cursor = defs.pageInfo.endCursor;
@@ -776,7 +787,7 @@ async function getMetaobjectTypes(
 async function dumpMetaobjectsForType(
   client: GraphQLClient,
   type: string,
-  outputDir: string
+  outputDir: string,
 ): Promise<Result<void, Error>> {
   logger.info(`Dumping metaobjects of type: ${type}...`);
 
@@ -818,7 +829,7 @@ async function dumpMetaobjectsForType(
   fs.writeFileSync(outputFile, content, "utf-8");
 
   logger.info(
-    `✓ Dumped ${transformed.length} metaobjects of type ${type} to ${outputFile}`
+    `✓ Dumped ${transformed.length} metaobjects of type ${type} to ${outputFile}`,
   );
   return { ok: true, data: undefined };
 }
@@ -828,7 +839,7 @@ async function dumpMetaobjectsForType(
  */
 export async function dumpMetaobjects(
   client: GraphQLClient,
-  outputDir: string
+  outputDir: string,
 ): Promise<Result<void, Error>> {
   logger.info("=== Dumping Metaobjects ===");
 
@@ -864,7 +875,7 @@ export async function dumpMetaobjects(
  */
 export async function dumpProducts(
   client: GraphQLClient,
-  outputDir: string
+  outputDir: string,
 ): Promise<Result<void, Error>> {
   logger.info("=== Dumping Products ===");
 
@@ -902,6 +913,7 @@ export async function dumpProducts(
           title: obj.title,
           descriptionHtml: obj.descriptionHtml,
           status: obj.status,
+          categoryId: obj.category?.id,
           vendor: obj.vendor,
           productType: obj.productType,
           tags: obj.tags,
@@ -986,6 +998,7 @@ export async function dumpProducts(
           if (refKeys.refProduct) metafield.refProduct = refKeys.refProduct;
           if (refKeys.refCollection)
             metafield.refCollection = refKeys.refCollection;
+          if (refKeys.refFile) metafield.refFile = refKeys.refFile;
         }
 
         // Handle list references if present
@@ -1003,7 +1016,7 @@ export async function dumpProducts(
               Array.isArray(parsed) &&
               parsed.every(
                 (item: any) =>
-                  typeof item === "string" && item.startsWith("gid://")
+                  typeof item === "string" && item.startsWith("gid://"),
               )
             ) {
               // Collect GIDs for batch resolution later
@@ -1046,7 +1059,7 @@ export async function dumpProducts(
         metafield.refList = gids
           .map((gid: string) => gidToNaturalKey.get(gid))
           .filter(
-            (item): item is NonNullable<typeof item> => item !== undefined
+            (item): item is NonNullable<typeof item> => item !== undefined,
           );
         delete (metafield as any)._listGids;
       }
@@ -1058,7 +1071,7 @@ export async function dumpProducts(
           metafield.refList = gids
             .map((gid: string) => gidToNaturalKey.get(gid))
             .filter(
-              (item): item is NonNullable<typeof item> => item !== undefined
+              (item): item is NonNullable<typeof item> => item !== undefined,
             );
           delete (metafield as any)._listGids;
         }
@@ -1081,9 +1094,8 @@ export async function dumpProducts(
   for (const product of transformed) {
     progressBar.tick();
     try {
-      const { PRODUCT_PUBLICATIONS_QUERY } = await import(
-        "../graphql/queries.js"
-      );
+      const { PRODUCT_PUBLICATIONS_QUERY } =
+        await import("../graphql/queries.js");
       const result = await client.request({
         query: PRODUCT_PUBLICATIONS_QUERY,
         variables: { id: product.id },
@@ -1099,7 +1111,7 @@ export async function dumpProducts(
         `Failed to fetch publications for product ${product.handle}`,
         {
           error: String(error),
-        }
+        },
       );
       // Continue - publications are optional
     }
@@ -1127,7 +1139,7 @@ export async function dumpProducts(
  */
 export async function dumpCollections(
   client: GraphQLClient,
-  outputDir: string
+  outputDir: string,
 ): Promise<Result<void, Error>> {
   logger.info("=== Dumping Collections ===");
 
@@ -1186,6 +1198,7 @@ export async function dumpCollections(
           if (refKeys.refProduct) metafield.refProduct = refKeys.refProduct;
           if (refKeys.refCollection)
             metafield.refCollection = refKeys.refCollection;
+          if (refKeys.refFile) metafield.refFile = refKeys.refFile;
         }
 
         // Handle list references if present
@@ -1202,7 +1215,7 @@ export async function dumpCollections(
               Array.isArray(parsed) &&
               parsed.every(
                 (item: any) =>
-                  typeof item === "string" && item.startsWith("gid://")
+                  typeof item === "string" && item.startsWith("gid://"),
               )
             ) {
               parsed.forEach((gid: string) => listReferenceGids.add(gid));
@@ -1237,7 +1250,7 @@ export async function dumpCollections(
         metafield.refList = gids
           .map((gid: string) => gidToNaturalKey.get(gid))
           .filter(
-            (item): item is NonNullable<typeof item> => item !== undefined
+            (item): item is NonNullable<typeof item> => item !== undefined,
           );
         delete (metafield as any)._listGids;
       }
@@ -1246,6 +1259,56 @@ export async function dumpCollections(
 
   // Convert to array
   const transformed = Array.from(collectionsMap.values());
+
+  // Fetch manual collection product memberships by handle
+  logger.info(
+    `Fetching product memberships for ${transformed.length} collections...`,
+  );
+  for (const collection of transformed) {
+    if (collection.ruleSet) continue; // smart collection - membership is rule-driven
+
+    const productHandles: string[] = [];
+    let hasNextPage = true;
+    let cursor: string | undefined;
+
+    while (hasNextPage) {
+      const productsResult = await client.request<{
+        collection: {
+          products: {
+            edges: Array<{ node: { id: string; handle: string } }>;
+            pageInfo: { hasNextPage: boolean; endCursor?: string };
+          };
+        };
+      }>({
+        query: COLLECTION_PRODUCTS_QUERY,
+        variables: { id: collection.id, first: 250, after: cursor },
+      });
+
+      if (!productsResult.ok) {
+        logger.warn(
+          `Failed to fetch products for collection ${collection.handle}`,
+          {
+            error: productsResult.error.message,
+          },
+        );
+        break;
+      }
+
+      const products = productsResult.data.data?.collection?.products;
+      if (!products) break;
+
+      for (const edge of products.edges || []) {
+        if (edge.node?.handle) {
+          productHandles.push(edge.node.handle);
+        }
+      }
+
+      hasNextPage = products.pageInfo.hasNextPage;
+      cursor = products.pageInfo.endCursor;
+    }
+
+    collection.productHandles = productHandles;
+  }
 
   // Fetch publications for each collection (done separately to avoid bulk query connection limit)
   logger.info(`Fetching publications for ${transformed.length} collections...`);
@@ -1259,9 +1322,8 @@ export async function dumpCollections(
   for (const collection of transformed) {
     progressBar.tick();
     try {
-      const { COLLECTION_PUBLICATIONS_QUERY } = await import(
-        "../graphql/queries.js"
-      );
+      const { COLLECTION_PUBLICATIONS_QUERY } =
+        await import("../graphql/queries.js");
       const result = await client.request({
         query: COLLECTION_PUBLICATIONS_QUERY,
         variables: { id: collection.id },
@@ -1280,7 +1342,7 @@ export async function dumpCollections(
         `Failed to fetch publications for collection ${collection.handle}`,
         {
           error: String(error),
-        }
+        },
       );
       // Continue - publications are optional
     }
@@ -1307,7 +1369,7 @@ export async function dumpCollections(
  */
 export async function dumpPages(
   client: GraphQLClient,
-  outputDir: string
+  outputDir: string,
 ): Promise<Result<void, Error>> {
   logger.info("=== Dumping Pages ===");
 
@@ -1362,6 +1424,7 @@ export async function dumpPages(
           if (refKeys.refProduct) metafield.refProduct = refKeys.refProduct;
           if (refKeys.refCollection)
             metafield.refCollection = refKeys.refCollection;
+          if (refKeys.refFile) metafield.refFile = refKeys.refFile;
         }
 
         // Add to parent page
@@ -1396,7 +1459,7 @@ export async function dumpPages(
  */
 export async function dumpShopMetafields(
   client: GraphQLClient,
-  outputDir: string
+  outputDir: string,
 ): Promise<Result<void, Error>> {
   logger.info("=== Dumping Shop Metafields ===");
 
@@ -1441,6 +1504,7 @@ export async function dumpShopMetafields(
           if (refKeys.refProduct) metafield.refProduct = refKeys.refProduct;
           if (refKeys.refCollection)
             metafield.refCollection = refKeys.refCollection;
+          if (refKeys.refFile) metafield.refFile = refKeys.refFile;
         }
 
         // Handle list references if present
@@ -1462,7 +1526,7 @@ export async function dumpShopMetafields(
   fs.writeFileSync(outputFile, content, "utf-8");
 
   logger.info(
-    `✓ Dumped ${shopMetafields.length} shop metafields to ${outputFile}`
+    `✓ Dumped ${shopMetafields.length} shop metafields to ${outputFile}`,
   );
   return { ok: true, data: undefined };
 }
@@ -1474,7 +1538,7 @@ export async function dumpShopMetafields(
  */
 export async function dumpBlogs(
   client: GraphQLClient,
-  outputDir: string
+  outputDir: string,
 ): Promise<Result<void, Error>> {
   logger.info("=== Dumping Blogs ===");
 
@@ -1527,6 +1591,7 @@ export async function dumpBlogs(
           if (refKeys.refProduct) metafield.refProduct = refKeys.refProduct;
           if (refKeys.refCollection)
             metafield.refCollection = refKeys.refCollection;
+          if (refKeys.refFile) metafield.refFile = refKeys.refFile;
         }
 
         // Handle list references if present
@@ -1567,7 +1632,7 @@ export async function dumpBlogs(
  */
 export async function dumpArticles(
   client: GraphQLClient,
-  outputDir: string
+  outputDir: string,
 ): Promise<Result<void, Error>> {
   logger.info("=== Dumping Articles ===");
 
@@ -1629,6 +1694,7 @@ export async function dumpArticles(
           if (refKeys.refProduct) metafield.refProduct = refKeys.refProduct;
           if (refKeys.refCollection)
             metafield.refCollection = refKeys.refCollection;
+          if (refKeys.refFile) metafield.refFile = refKeys.refFile;
         }
 
         // Handle list references if present
@@ -1675,7 +1741,7 @@ export async function dumpArticles(
  */
 export async function dumpAllData(
   client: GraphQLClient,
-  outputDir: string
+  outputDir: string,
 ): Promise<Result<void, Error>> {
   logger.info("=== Starting Full Data Dump ===");
 

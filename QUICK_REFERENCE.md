@@ -37,6 +37,18 @@ npm install              # Install dependencies
 npm run build           # Build packages
 cp .env.example .env    # Create config file
 # Edit .env with your store credentials
+
+# Generate source/destination tokens (OAuth callback flow)
+npm run cli -- auth:src-token
+npm run cli -- auth:dst-token
+```
+
+### Authentication
+
+```bash
+npm run cli -- auth:src-token
+npm run cli -- auth:dst-token
+npm run cli -- auth:token --shop <shop> --client-id <id> --client-secret <secret> --scopes <scopes>
 ```
 
 ### Definitions (Schema)
@@ -218,8 +230,12 @@ productHandle: "tshirt", sku: "RED-L"
 ```env
 # Required
 SRC_SHOP_DOMAIN=source.myshopify.com
+SRC_CLIENT_ID=src_client_id
+SRC_SECRET=shpss_src_secret
 SRC_ADMIN_TOKEN=shpat_xxx...
 DST_SHOP_DOMAIN=dest.myshopify.com
+DST_CLIENT_ID=dst_client_id
+DST_SECRET=shpss_dst_secret
 DST_ADMIN_TOKEN=shpat_yyy...
 
 # Optional
@@ -516,15 +532,27 @@ npm run dev -- <command>
 ## Required Shopify API Scopes
 
 ```
-read_products, write_products
-read_collections, write_collections
-read_metaobjects, write_metaobjects
-read_content, write_content
-read_files, write_files
-read_navigation, write_navigation
-read_online_store_pages, write_online_store_pages
-read_discounts, write_discounts
-read_markets, write_markets
+Source app (recommended read-only):
+read_products
+read_collections
+read_metaobjects
+read_content
+read_files
+read_online_store_navigation
+read_online_store_pages
+read_discounts
+read_markets
+
+Destination app (write):
+write_products
+write_collections
+write_metaobjects
+write_content
+write_files
+write_online_store_navigation
+write_online_store_pages
+write_discounts
+write_markets
 ```
 
 ## Security Checklist

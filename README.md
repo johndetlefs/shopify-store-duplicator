@@ -29,8 +29,9 @@ Migrate **all custom data** from a source Shopify store to a destination store:
 ## Prerequisites
 
 - Node.js 20+
-- Shopify Admin API access tokens for both source and destination stores
-- Required API scopes: `read/write` for products, collections, metaobjects, content, files, navigation, pages
+- Dev Dashboard apps installed on source and destination stores (recommended: separate apps)
+- Source and destination app credentials (`CLIENT_ID` + `SECRET`) or pre-minted admin tokens
+- Required API scopes for migrated resources (products, collections, metaobjects, content, files, online store navigation/pages, discounts, markets)
 
 ## Quick Start
 
@@ -43,7 +44,11 @@ npm run build
 cp .env.example .env
 # Edit .env with your store credentials
 
-# 3. Complete Migration
+# 3. Generate source/destination tokens (OAuth callback flow)
+npm run cli -- auth:src-token                         # read-only source token
+npm run cli -- auth:dst-token                         # write-capable destination token
+
+# 4. Complete Migration
 npm run cli -- defs:dump -o source-defs.json          # Export schema
 npm run cli -- defs:apply -f source-defs.json         # Import schema
 npm run cli -- data:dump -o ./dumps                   # Export data
@@ -60,7 +65,7 @@ npm run cli -- markets:dump -o markets.json           # Export markets (regions,
 npm run cli -- markets:apply -f markets.json          # Import markets
 # OR for bulk imports (faster): --csv flag + manual import via Shopify Admin
 
-# 4. Validate
+# 5. Validate
 npm run cli -- defs:diff -f source-defs.json          # Check schema
 npm run cli -- data:diff -i ./dumps                   # Check data
 ```
@@ -223,10 +228,18 @@ Configure with your credentials:
 ```env
 # Source Store
 SRC_SHOP_DOMAIN=my-source-store.myshopify.com
+# Source app credentials (recommended read-only app)
+SRC_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SRC_SECRET=shpss_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# Generated via `npm run cli -- auth:src-token`
 SRC_ADMIN_TOKEN=shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 # Destination Store
 DST_SHOP_DOMAIN=my-destination-store.myshopify.com
+# Destination app credentials (write scopes)
+DST_CLIENT_ID=yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+DST_SECRET=shpss_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+# Generated via `npm run cli -- auth:dst-token`
 DST_ADMIN_TOKEN=shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 # API Configuration
@@ -239,20 +252,29 @@ LOG_FORMAT=pretty       # pretty | json
 
 ### Getting Admin API Tokens
 
-1. Go to Shopify admin → **Apps** → **App development** → **Create an app**
-2. Name it (e.g., "Store Duplicator")
-3. **API credentials** tab → **Configure Admin API scopes**
-4. Enable required scopes:
-   - `read_products`, `write_products`
-   - `read_collections`, `write_collections`
-   - `read_metaobjects`, `write_metaobjects`
-   - `read_content`, `write_content`
-   - `read_files`, `write_files`
-   - `read_navigation`, `write_navigation`
-   - `read_online_store_pages`, `write_online_store_pages`
-   - `read_discounts`, `write_discounts`
-5. **Save** → **Install app** → Copy the **Admin API access token**
-6. Repeat for both source and destination stores
+Use Dev Dashboard app credentials + OAuth code exchange.
+
+1. Create app(s) in **Dev Dashboard** and create a released version with required scopes.
+2. Add allowed redirect URL(s):
+
+- `http://localhost:3456/oauth/callback`
+- `http://localhost:3457/oauth/callback`
+
+3. Install app on the relevant store.
+4. Set `.env` credentials (`SRC_*` and `DST_*`).
+5. Generate tokens with CLI:
+
+- `npm run cli -- auth:src-token` (source)
+- `npm run cli -- auth:dst-token` (destination)
+
+6. Approve each browser prompt; copy printed `SRC_ADMIN_TOKEN` / `DST_ADMIN_TOKEN` into `.env`.
+
+Recommended scope split:
+
+- Source app (read-only):
+  - `read_products`, `read_collections`, `read_metaobjects`, `read_content`, `read_files`, `read_online_store_navigation`, `read_online_store_pages`, `read_discounts`, `read_markets`
+- Destination app (write):
+  - `write_products`, `write_collections`, `write_metaobjects`, `write_content`, `write_files`, `write_online_store_navigation`, `write_online_store_pages`, `write_discounts`, `write_markets`
 
 ## CLI Commands Reference
 
@@ -263,6 +285,14 @@ npm run cli -- defs:dump -o <file>        # Export schema
 npm run cli -- defs:apply -f <file>       # Import schema
 npm run cli -- defs:diff -f <file>        # Compare schema (includes usage validation)
 npm run cli -- defs:diff -f <file> --no-usage-check  # Compare schema (faster, skip usage check)
+```
+
+### Authentication
+
+```bash
+npm run cli -- auth:src-token                 # Generate source token from SRC_* env vars
+npm run cli -- auth:dst-token                 # Generate destination token from DST_* env vars
+npm run cli -- auth:token --shop <shop> --client-id <id> --client-secret <secret> --scopes <scopes>
 ```
 
 ### Data

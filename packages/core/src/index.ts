@@ -14,6 +14,9 @@ export * from "./utils/progress.js";
 export * from "./graphql/client.js";
 export * from "./graphql/queries.js";
 
+// Auth
+export * from "./auth/offline-token.js";
+
 // Bulk Operations
 export * from "./bulk/runner.js";
 

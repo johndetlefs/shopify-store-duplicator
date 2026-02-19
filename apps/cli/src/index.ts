@@ -25,6 +25,7 @@ import { readFile, writeFile } from "fs/promises";
 import { createInterface } from "readline";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import http from "node:http";
 
 // CRITICAL: Load environment variables BEFORE importing anything that uses them
 const __filename = fileURLToPath(import.meta.url);
@@ -35,6 +36,10 @@ dotenv.config({ path: resolve(workspaceRoot, ".env") });
 // NOW import modules that depend on environment variables (like logger)
 import {
   createGraphQLClient,
+  buildAuthorizeUrl,
+  exchangeCodeForOfflineToken,
+  randomOAuthState,
+  verifyShopifyOAuthHmac,
   dumpDefinitions,
   applyDefinitions,
   diffDefinitions,
@@ -67,6 +72,120 @@ import {
   type GraphQLClientConfig,
 } from "@shopify-duplicator/core";
 
+function normalizeScopes(scopes: string): string {
+  return scopes
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(",");
+}
+
+async function getOfflineTokenViaLocalCallback(input: {
+  shop: string;
+  clientId: string;
+  clientSecret: string;
+  scopes: string;
+  port: number;
+  expiring?: 0 | 1;
+}): Promise<{ accessToken: string; scope?: string; expiresIn?: number }> {
+  const redirectUri = `http://localhost:${input.port}/oauth/callback`;
+  const state = randomOAuthState();
+
+  const authorizeUrl = buildAuthorizeUrl({
+    shop: input.shop,
+    clientId: input.clientId,
+    scopes: input.scopes,
+    redirectUri,
+    state,
+  });
+
+  logger.info(
+    "Open this URL in a browser while logged into the Shopify admin",
+    {
+      authorizeUrl,
+      redirectUri,
+    },
+  );
+  logger.info(
+    "After approving, return here; the local server will receive the callback and print your token.",
+  );
+
+  return new Promise((resolvePromise, rejectPromise) => {
+    const server = http.createServer(async (req, res) => {
+      try {
+        if (!req.url) {
+          res.writeHead(400).end("Missing url");
+          return;
+        }
+
+        const url = new URL(req.url, `http://localhost:${input.port}`);
+
+        if (url.pathname !== "/oauth/callback") {
+          res.writeHead(404).end("Not found");
+          return;
+        }
+
+        const params = Object.fromEntries(url.searchParams.entries());
+
+        if (!params.code || !params.hmac || !params.state) {
+          res.writeHead(400).end("Missing required params");
+          return;
+        }
+
+        if (params.state !== state) {
+          res.writeHead(403).end("Invalid state");
+          return;
+        }
+
+        const hmacOk = verifyShopifyOAuthHmac({
+          params,
+          clientSecret: input.clientSecret,
+        });
+        if (!hmacOk.ok) {
+          res.writeHead(403).end("Invalid HMAC");
+          return;
+        }
+
+        const tokenResult = await exchangeCodeForOfflineToken({
+          shop: input.shop,
+          clientId: input.clientId,
+          clientSecret: input.clientSecret,
+          code: params.code,
+          expiring: input.expiring,
+        });
+
+        if (!tokenResult.ok) {
+          res.writeHead(500).end(tokenResult.error.message);
+          return;
+        }
+
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("Token received. You can close this tab.");
+
+        server.close();
+        resolvePromise({
+          accessToken: tokenResult.data.accessToken,
+          scope: tokenResult.data.scope,
+          expiresIn: tokenResult.data.expiresIn,
+        });
+      } catch (e: any) {
+        try {
+          res.writeHead(500, { "Content-Type": "text/plain" });
+          res.end(`Error: ${e?.message || e}`);
+        } catch {
+          // ignore
+        }
+        server.close();
+        rejectPromise(e);
+      }
+    });
+
+    server.listen(input.port, () => {
+      logger.info(`Listening on ${redirectUri}`);
+    });
+  });
+}
+
 /**
  * Helper to resolve paths relative to workspace root
  */
@@ -93,7 +212,7 @@ function formatStatsTable(
     deleted?: number;
     skipped?: number;
     automaticManagement?: number;
-  }
+  },
 ): string {
   const lines: string[] = [];
   lines.push(`\n${title}:`);
@@ -113,7 +232,7 @@ function formatStatsTable(
     lines.push(`  Skipped:  ${stats.skipped.toString().padStart(6)}`);
   if (stats.automaticManagement !== undefined)
     lines.push(
-      `  Auto Mgmt: ${stats.automaticManagement.toString().padStart(5)}`
+      `  Auto Mgmt: ${stats.automaticManagement.toString().padStart(5)}`,
     );
   if (stats.failed !== undefined)
     lines.push(`  Failed:   ${stats.failed.toString().padStart(6)}`);
@@ -152,30 +271,182 @@ program
   .option(
     "--src-shop <domain>",
     "Source shop domain",
-    process.env.SRC_SHOP_DOMAIN
+    process.env.SRC_SHOP_DOMAIN,
   )
   .option(
     "--src-token <token>",
     "Source admin token",
-    process.env.SRC_ADMIN_TOKEN
+    process.env.SRC_ADMIN_TOKEN,
   )
   .option(
     "--dst-shop <domain>",
     "Destination shop domain",
-    process.env.DST_SHOP_DOMAIN
+    process.env.DST_SHOP_DOMAIN,
   )
   .option(
     "--dst-token <token>",
     "Destination admin token",
-    process.env.DST_ADMIN_TOKEN
+    process.env.DST_ADMIN_TOKEN,
   )
   .option(
     "--api-version <version>",
     "Shopify API version",
-    process.env.SHOPIFY_API_VERSION || "2025-10"
+    process.env.SHOPIFY_API_VERSION || "2025-10",
   )
   .option("--dry-run", "Preview changes without applying", false)
   .option("--verbose", "Enable debug logging", false);
+
+/**
+ * AUTH COMMANDS
+ */
+
+const DEFAULT_SRC_SCOPES = normalizeScopes(
+  [
+    "read_products",
+    "read_collections",
+    "read_metaobjects",
+    "read_content",
+    "read_files",
+    "read_online_store_navigation",
+    "read_online_store_pages",
+    "read_discounts",
+    "read_markets",
+  ].join(","),
+);
+
+const DEFAULT_DST_SCOPES = normalizeScopes(
+  [
+    "write_products",
+    "write_collections",
+    "write_metaobjects",
+    "write_content",
+    "write_files",
+    "write_online_store_navigation",
+    "write_online_store_pages",
+    "write_discounts",
+    "write_markets",
+  ].join(","),
+);
+
+program
+  .command("auth:token")
+  .description(
+    "Generate an offline Admin API token via OAuth (authorization code grant)",
+  )
+  .requiredOption("--shop <domain>", "Shop domain, e.g. my-shop.myshopify.com")
+  .requiredOption("--client-id <id>", "App client id")
+  .requiredOption("--client-secret <secret>", "App client secret")
+  .option(
+    "--scopes <scopes>",
+    "Comma-separated scopes to request (must be allowed by the app)",
+    DEFAULT_SRC_SCOPES,
+  )
+  .option("--port <port>", "Local callback port", "3456")
+  .option(
+    "--expiring",
+    "Request an expiring offline token (requires refresh logic)",
+    false,
+  )
+  .action(async (options) => {
+    const globalOpts = program.opts();
+    if (globalOpts.verbose) logger.setLevel("debug");
+
+    const shop = options.shop;
+    const clientId = options.clientId;
+    const clientSecret = options.clientSecret;
+    const scopes = normalizeScopes(options.scopes);
+    const port = Number(options.port);
+    const expiring = options.expiring ? 1 : 0;
+
+    logger.warn(
+      "Ensure your app version allows redirect URI: http://localhost:<port>/oauth/callback",
+    );
+
+    const { accessToken, scope, expiresIn } =
+      await getOfflineTokenViaLocalCallback({
+        shop,
+        clientId,
+        clientSecret,
+        scopes,
+        port,
+        expiring,
+      });
+
+    logger.info("Token acquired");
+    // Print in a copy/paste friendly way
+    // (stdout is intentionally plain; avoid logger redaction surprises)
+    process.stdout.write(`\nACCESS_TOKEN=${accessToken}\n`);
+    if (scope) process.stdout.write(`SCOPE=${scope}\n`);
+    if (expiresIn) process.stdout.write(`EXPIRES_IN=${expiresIn}\n`);
+  });
+
+program
+  .command("auth:src-token")
+  .description("Generate offline token for source shop (read-only scopes)")
+  .option("--scopes <scopes>", "Override requested scopes", DEFAULT_SRC_SCOPES)
+  .option("--port <port>", "Local callback port", "3456")
+  .action(async (options) => {
+    const globalOpts = program.opts();
+    if (globalOpts.verbose) logger.setLevel("debug");
+
+    const srcShop = globalOpts.srcShop || process.env.SRC_SHOP_DOMAIN;
+    const clientId = process.env.SRC_CLIENT_ID;
+    const clientSecret = process.env.SRC_SECRET;
+
+    if (!srcShop || !clientId || !clientSecret) {
+      logger.error(
+        "Missing SRC credentials. Set SRC_SHOP_DOMAIN, SRC_CLIENT_ID, SRC_SECRET.",
+      );
+      process.exit(1);
+    }
+
+    const scopes = normalizeScopes(options.scopes);
+    const port = Number(options.port);
+
+    const { accessToken } = await getOfflineTokenViaLocalCallback({
+      shop: srcShop,
+      clientId,
+      clientSecret,
+      scopes,
+      port,
+    });
+
+    process.stdout.write(`\nSRC_ADMIN_TOKEN=${accessToken}\n`);
+  });
+
+program
+  .command("auth:dst-token")
+  .description("Generate offline token for destination shop (write scopes)")
+  .option("--scopes <scopes>", "Override requested scopes", DEFAULT_DST_SCOPES)
+  .option("--port <port>", "Local callback port", "3457")
+  .action(async (options) => {
+    const globalOpts = program.opts();
+    if (globalOpts.verbose) logger.setLevel("debug");
+
+    const dstShop = globalOpts.dstShop || process.env.DST_SHOP_DOMAIN;
+    const clientId = process.env.DST_CLIENT_ID;
+    const clientSecret = process.env.DST_SECRET;
+
+    if (!dstShop || !clientId || !clientSecret) {
+      logger.error(
+        "Missing DST credentials. Set DST_SHOP_DOMAIN, DST_CLIENT_ID, DST_SECRET.",
+      );
+      process.exit(1);
+    }
+
+    const scopes = normalizeScopes(options.scopes);
+    const port = Number(options.port);
+
+    const { accessToken } = await getOfflineTokenViaLocalCallback({
+      shop: dstShop,
+      clientId,
+      clientSecret,
+      scopes,
+      port,
+    });
+
+    process.stdout.write(`\nDST_ADMIN_TOKEN=${accessToken}\n`);
+  });
 
 /**
  * DEFINITIONS COMMANDS
@@ -195,7 +466,7 @@ program
 
     if (!globalOpts.srcShop || !globalOpts.srcToken) {
       logger.error(
-        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN."
+        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -232,7 +503,7 @@ program
 program
   .command("defs:apply")
   .description(
-    "Apply metaobject and metafield definitions to destination store"
+    "Apply metaobject and metafield definitions to destination store",
   )
   .option("-f, --file <file>", "Input file", "./dumps/definitions.json")
   .action(async (options) => {
@@ -244,7 +515,7 @@ program
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
       logger.error(
-        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -284,13 +555,13 @@ program
     if (result.data.metaobjects.errors.length > 0) {
       logger.warn(
         "Metaobject definition errors:",
-        result.data.metaobjects.errors
+        result.data.metaobjects.errors,
       );
     }
     if (result.data.metafields.errors.length > 0) {
       logger.warn(
         "Metafield definition errors:",
-        result.data.metafields.errors
+        result.data.metafields.errors,
       );
     }
 
@@ -324,7 +595,7 @@ program
 
     if (!globalOpts.srcShop || !globalOpts.srcToken) {
       logger.error(
-        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN."
+        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -386,7 +657,7 @@ program
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
       logger.error(
-        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -586,7 +857,7 @@ program
     if (result.data.metaobjects.errors.length > 0) {
       logger.warn(
         "Metaobject errors:",
-        result.data.metaobjects.errors.slice(0, 10)
+        result.data.metaobjects.errors.slice(0, 10),
       );
     }
     if (
@@ -601,7 +872,7 @@ program
     ) {
       logger.warn(
         "Collection errors:",
-        result.data.collections.errors.slice(0, 10)
+        result.data.collections.errors.slice(0, 10),
       );
     }
     if (result.data.blogs.errors.length > 0) {
@@ -616,7 +887,7 @@ program
     if (result.data.metafields.errors.length > 0) {
       logger.warn(
         "Metafield errors:",
-        result.data.metafields.errors.slice(0, 10)
+        result.data.metafields.errors.slice(0, 10),
       );
     }
 
@@ -658,7 +929,7 @@ program
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
       logger.error(
-        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -709,7 +980,7 @@ program
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
       logger.error(
-        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -731,10 +1002,10 @@ program
       logger.error("  --files-only         Delete all files");
       logger.error("  --products-only      Delete all products (coming soon)");
       logger.error(
-        "  --collections-only   Delete all collections (coming soon)"
+        "  --collections-only   Delete all collections (coming soon)",
       );
       logger.error(
-        "  --metaobjects-only   Delete all metaobjects (coming soon)"
+        "  --metaobjects-only   Delete all metaobjects (coming soon)",
       );
       logger.error("");
       logger.error("Example: npm run cli -- data:drop --files-only");
@@ -743,7 +1014,7 @@ program
 
     // Warn user about destructive operation
     logger.warn(
-      "⚠️  WARNING: This will PERMANENTLY DELETE data from your destination store!"
+      "⚠️  WARNING: This will PERMANENTLY DELETE data from your destination store!",
     );
     logger.warn("");
     if (shouldDropFiles) logger.warn("  - All files will be deleted");
@@ -793,7 +1064,7 @@ program
           total: result.data.total,
           deleted: result.data.deleted,
           failed: result.data.failed,
-        })
+        }),
       );
     }
 
@@ -833,7 +1104,7 @@ program
 
     if (!globalOpts.srcShop || !globalOpts.srcToken) {
       logger.error(
-        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN."
+        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -870,7 +1141,7 @@ program
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
       logger.error(
-        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -898,7 +1169,7 @@ program
       client,
       filePath,
       index,
-      globalOpts.dstShop
+      globalOpts.dstShop,
     );
 
     if (!result.ok) {
@@ -925,7 +1196,7 @@ program
       process.exit(1);
     } else if (result.data.failed > 0) {
       logger.warn(
-        `\n${result.data.failed} menus failed to apply, but ${totalProcessed} succeeded`
+        `\n${result.data.failed} menus failed to apply, but ${totalProcessed} succeeded`,
       );
     }
   });
@@ -940,7 +1211,7 @@ program
   .option("-o, --output <file>", "Output file", "./dumps/redirects.json")
   .option(
     "--csv",
-    "Export as CSV for manual import via Shopify Admin (faster for bulk imports)"
+    "Export as CSV for manual import via Shopify Admin (faster for bulk imports)",
   )
   .action(async (options) => {
     const globalOpts = program.opts();
@@ -951,7 +1222,7 @@ program
 
     if (!globalOpts.srcShop || !globalOpts.srcToken) {
       logger.error(
-        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN."
+        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -996,7 +1267,7 @@ program
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
       logger.error(
-        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -1053,7 +1324,7 @@ program
 
     if (!globalOpts.srcShop || !globalOpts.srcToken) {
       logger.error(
-        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN."
+        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -1091,7 +1362,7 @@ program
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
       logger.error(
-        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -1125,7 +1396,7 @@ program
         skipped: result.data.skipped,
         automaticManagement: result.data.automaticManagement,
         failed: result.data.failed,
-      })
+      }),
     );
 
     // Report automatic management policies separately
@@ -1134,19 +1405,19 @@ program
         .filter((e) => e.isAutomaticManagement)
         .map((e) => e.policy);
       logger.info(
-        `\nNote: ${result.data.automaticManagement} policy/policies have automatic management enabled and were not updated:`
+        `\nNote: ${result.data.automaticManagement} policy/policies have automatic management enabled and were not updated:`,
       );
       autoMgmtPolicies.forEach((policy) => {
         logger.info(`  - ${policy}`);
       });
       logger.info(
-        "\nTo update these policies, disable automatic management in Shopify Admin → Settings → Policies"
+        "\nTo update these policies, disable automatic management in Shopify Admin → Settings → Policies",
       );
     }
 
     // Report actual errors (non-automatic management)
     const realErrors = result.data.errors.filter(
-      (e) => !e.isAutomaticManagement
+      (e) => !e.isAutomaticManagement,
     );
     if (realErrors.length > 0) {
       logger.warn("\nPolicy errors:", realErrors);
@@ -1178,7 +1449,7 @@ program
 
     if (!globalOpts.srcShop || !globalOpts.srcToken) {
       logger.error(
-        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN."
+        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -1216,7 +1487,7 @@ program
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
       logger.error(
-        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -1254,7 +1525,7 @@ program
         updated: result.data.updated,
         skipped: result.data.skipped,
         failed: result.data.failed,
-      })
+      }),
     );
 
     if (result.data.errors.length > 0) {
@@ -1272,7 +1543,7 @@ program
       process.exit(1);
     } else if (result.data.failed > 0) {
       logger.warn(
-        `\n${result.data.failed} discounts failed to apply, but ${totalProcessed} succeeded`
+        `\n${result.data.failed} discounts failed to apply, but ${totalProcessed} succeeded`,
       );
     }
 
@@ -1289,11 +1560,11 @@ program
   .option(
     "-f, --file <file>",
     "Source definitions file",
-    "./dumps/definitions.json"
+    "./dumps/definitions.json",
   )
   .option(
     "--no-usage-check",
-    "Skip checking data dumps for reserved metafield usage (faster)"
+    "Skip checking data dumps for reserved metafield usage (faster)",
   )
   .action(async (options) => {
     const globalOpts = program.opts();
@@ -1304,7 +1575,7 @@ program
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
       logger.error(
-        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -1342,18 +1613,18 @@ program
       // Show reserved metafields even when identical
       if (diff.metafields.missingReserved.length > 0) {
         logger.info(
-          `\nℹ️  Shopify-reserved metafield definitions (${diff.metafields.missingReserved.length}) - system-managed, cannot be created via API:`
+          `\nℹ️  Shopify-reserved metafield definitions (${diff.metafields.missingReserved.length}) - system-managed, cannot be created via API:`,
         );
         diff.metafields.missingReserved
           .slice(0, 10)
           .forEach((triplet) => logger.info(`  - ${triplet}`));
         if (diff.metafields.missingReserved.length > 10) {
           logger.info(
-            `  ... and ${diff.metafields.missingReserved.length - 10} more`
+            `  ... and ${diff.metafields.missingReserved.length - 10} more`,
           );
         }
         logger.info(
-          `  Note: These are automatically available in Shopify stores when needed.`
+          `  Note: These are automatically available in Shopify stores when needed.`,
         );
 
         // Show usage information if available
@@ -1364,51 +1635,51 @@ program
 
           if (totalUsing > 0) {
             logger.warn(
-              `\n⚠️  Warning: ${totalUsing} resources are using reserved metafields:`
+              `\n⚠️  Warning: ${totalUsing} resources are using reserved metafields:`,
             );
 
             if (diff.reservedUsage.productsUsingReserved.length > 0) {
               logger.warn(
-                `  - ${diff.reservedUsage.productsUsingReserved.length} products:`
+                `  - ${diff.reservedUsage.productsUsingReserved.length} products:`,
               );
               diff.reservedUsage.productsUsingReserved
                 .slice(0, 5)
                 .forEach(({ handle, metafields }) =>
-                  logger.warn(`      ${handle} (${metafields.join(", ")})`)
+                  logger.warn(`      ${handle} (${metafields.join(", ")})`),
                 );
               if (diff.reservedUsage.productsUsingReserved.length > 5) {
                 logger.warn(
                   `      ... and ${
                     diff.reservedUsage.productsUsingReserved.length - 5
-                  } more`
+                  } more`,
                 );
               }
             }
 
             if (diff.reservedUsage.collectionsUsingReserved.length > 0) {
               logger.warn(
-                `  - ${diff.reservedUsage.collectionsUsingReserved.length} collections:`
+                `  - ${diff.reservedUsage.collectionsUsingReserved.length} collections:`,
               );
               diff.reservedUsage.collectionsUsingReserved
                 .slice(0, 5)
                 .forEach(({ handle, metafields }) =>
-                  logger.warn(`      ${handle} (${metafields.join(", ")})`)
+                  logger.warn(`      ${handle} (${metafields.join(", ")})`),
                 );
               if (diff.reservedUsage.collectionsUsingReserved.length > 5) {
                 logger.warn(
                   `      ... and ${
                     diff.reservedUsage.collectionsUsingReserved.length - 5
-                  } more`
+                  } more`,
                 );
               }
             }
 
             logger.warn(
-              `  These metafields should still work when applying data (Shopify manages them).`
+              `  These metafields should still work when applying data (Shopify manages them).`,
             );
           } else {
             logger.info(
-              `  ✓ No products or collections are using these reserved metafields.`
+              `  ✓ No products or collections are using these reserved metafields.`,
             );
           }
         }
@@ -1416,7 +1687,7 @@ program
     } else {
       if (diff.summary.totalActionable > 0) {
         logger.warn(
-          `Found ${diff.summary.totalActionable} actionable differences`
+          `Found ${diff.summary.totalActionable} actionable differences`,
         );
       } else {
         logger.info("✓ Custom definitions are identical!");
@@ -1425,21 +1696,21 @@ program
       // Metaobject differences
       if (diff.metaobjects.missing.length > 0) {
         logger.warn(
-          `\n❌ Missing metaobject types (${diff.metaobjects.missing.length}):`
+          `\n❌ Missing metaobject types (${diff.metaobjects.missing.length}):`,
         );
         diff.metaobjects.missing.forEach((type) => logger.warn(`  - ${type}`));
       }
 
       if (diff.metaobjects.extra.length > 0) {
         logger.warn(
-          `\n➕ Extra metaobject types (${diff.metaobjects.extra.length}):`
+          `\n➕ Extra metaobject types (${diff.metaobjects.extra.length}):`,
         );
         diff.metaobjects.extra.forEach((type) => logger.warn(`  - ${type}`));
       }
 
       if (diff.metaobjects.changed.length > 0) {
         logger.warn(
-          `\n⚠️  Changed metaobject types (${diff.metaobjects.changed.length}):`
+          `\n⚠️  Changed metaobject types (${diff.metaobjects.changed.length}):`,
         );
         diff.metaobjects.changed.forEach(({ type, changes }) => {
           logger.warn(`  - ${type}:`);
@@ -1450,7 +1721,7 @@ program
       // Metafield differences (custom namespaces only)
       if (diff.metafields.missing.length > 0) {
         logger.warn(
-          `\n❌ Missing metafield definitions (${diff.metafields.missing.length}):`
+          `\n❌ Missing metafield definitions (${diff.metafields.missing.length}):`,
         );
         diff.metafields.missing
           .slice(0, 20)
@@ -1462,7 +1733,7 @@ program
 
       if (diff.metafields.extra.length > 0) {
         logger.warn(
-          `\n➕ Extra metafield definitions (${diff.metafields.extra.length}):`
+          `\n➕ Extra metafield definitions (${diff.metafields.extra.length}):`,
         );
         diff.metafields.extra
           .slice(0, 20)
@@ -1474,7 +1745,7 @@ program
 
       if (diff.metafields.changed.length > 0) {
         logger.warn(
-          `\n⚠️  Changed metafield definitions (${diff.metafields.changed.length}):`
+          `\n⚠️  Changed metafield definitions (${diff.metafields.changed.length}):`,
         );
         diff.metafields.changed.slice(0, 10).forEach(({ triplet, changes }) => {
           logger.warn(`  - ${triplet}:`);
@@ -1488,18 +1759,18 @@ program
       // Shopify-reserved metafield definitions (informational only)
       if (diff.metafields.missingReserved.length > 0) {
         logger.info(
-          `\nℹ️  Shopify-reserved metafield definitions (${diff.metafields.missingReserved.length}) - system-managed, cannot be created via API:`
+          `\nℹ️  Shopify-reserved metafield definitions (${diff.metafields.missingReserved.length}) - system-managed, cannot be created via API:`,
         );
         diff.metafields.missingReserved
           .slice(0, 10)
           .forEach((triplet) => logger.info(`  - ${triplet}`));
         if (diff.metafields.missingReserved.length > 10) {
           logger.info(
-            `  ... and ${diff.metafields.missingReserved.length - 10} more`
+            `  ... and ${diff.metafields.missingReserved.length - 10} more`,
           );
         }
         logger.info(
-          `  Note: These are automatically available in Shopify stores when needed.`
+          `  Note: These are automatically available in Shopify stores when needed.`,
         );
       }
 
@@ -1522,7 +1793,7 @@ program
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
       logger.error(
-        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -1551,7 +1822,7 @@ program
       logger.info("✓ Data is identical!");
     } else {
       logger.warn(
-        `Found ${diff.summary.totalMissing} missing, ${diff.summary.totalExtra} extra`
+        `Found ${diff.summary.totalMissing} missing, ${diff.summary.totalExtra} extra`,
       );
 
       // Metaobjects by type
@@ -1569,7 +1840,7 @@ program
                 .forEach((h) => logger.warn(`       - ${h}`));
               if (typeDiff.missing.length > 5) {
                 logger.warn(
-                  `       ... and ${typeDiff.missing.length - 5} more`
+                  `       ... and ${typeDiff.missing.length - 5} more`,
                 );
               }
             }
@@ -1590,7 +1861,7 @@ program
             .forEach((h) => logger.warn(`     - ${h}`));
           if (diff.products.missing.length > 10) {
             logger.warn(
-              `     ... and ${diff.products.missing.length - 10} more`
+              `     ... and ${diff.products.missing.length - 10} more`,
             );
           }
         }
@@ -1607,20 +1878,20 @@ program
         logger.info("\n📚 Collections:");
         if (diff.collections.missing.length > 0) {
           logger.warn(
-            `  ❌ Missing: ${diff.collections.missing.length} collections`
+            `  ❌ Missing: ${diff.collections.missing.length} collections`,
           );
           diff.collections.missing
             .slice(0, 10)
             .forEach((h) => logger.warn(`     - ${h}`));
           if (diff.collections.missing.length > 10) {
             logger.warn(
-              `     ... and ${diff.collections.missing.length - 10} more`
+              `     ... and ${diff.collections.missing.length - 10} more`,
             );
           }
         }
         if (diff.collections.extra.length > 0) {
           logger.warn(
-            `  ➕ Extra: ${diff.collections.extra.length} collections`
+            `  ➕ Extra: ${diff.collections.extra.length} collections`,
           );
         }
       }
@@ -1663,7 +1934,7 @@ program
 
     if (!globalOpts.srcShop || !globalOpts.srcToken) {
       logger.error(
-        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN."
+        "Missing source shop credentials. Set SRC_SHOP_DOMAIN and SRC_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -1678,7 +1949,7 @@ program
 
     logger.info(`Dumping markets to ${outputPath}`);
     logger.info(
-      "Note: Markets feature requires read_markets scope and may be plan-specific"
+      "Note: Markets feature requires read_markets scope and may be plan-specific",
     );
 
     const result = await dumpMarkets(client, outputPath);
@@ -1704,7 +1975,7 @@ program
 
     if (!globalOpts.dstShop || !globalOpts.dstToken) {
       logger.error(
-        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN."
+        "Missing destination shop credentials. Set DST_SHOP_DOMAIN and DST_ADMIN_TOKEN.",
       );
       process.exit(1);
     }
@@ -1724,10 +1995,10 @@ program
 
     logger.info(`Applying markets from ${filePath}`);
     logger.info(
-      "Note: Markets feature requires write_markets scope and may be plan-specific"
+      "Note: Markets feature requires write_markets scope and may be plan-specific",
     );
     logger.info(
-      "⚠️  Custom domains must be configured manually in Shopify Admin"
+      "⚠️  Custom domains must be configured manually in Shopify Admin",
     );
     logger.info("⚠️  Primary market status cannot be changed via API");
 
@@ -1745,14 +2016,14 @@ program
         updated: result.data.marketsUpdated,
         skipped: result.data.marketsSkipped,
         failed: result.data.marketsFailed,
-      })
+      }),
     );
 
     console.log(
       formatStatsTable("Regions", {
         created: result.data.regionsRegistered,
         deleted: result.data.regionsRemoved,
-      })
+      }),
     );
 
     console.log(
@@ -1760,7 +2031,7 @@ program
         created: result.data.webPresencesCreated,
         updated: result.data.webPresencesUpdated,
         failed: result.data.webPresencesFailed,
-      })
+      }),
     );
 
     if (result.data.errors.length > 0) {

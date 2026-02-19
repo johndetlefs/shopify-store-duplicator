@@ -4,7 +4,8 @@
 
 - Node.js 20.0.0 or higher
 - npm 9.0.0 or higher
-- Shopify Admin API access tokens for both source and destination stores
+- Dev Dashboard apps installed on source and destination stores
+- App credentials (`CLIENT_ID` + `SECRET`) for each app
 
 ## Installation
 
@@ -41,10 +42,18 @@ Edit `.env` with your store credentials:
 ```env
 # Source Store
 SRC_SHOP_DOMAIN=your-source-store.myshopify.com
+# Source app credentials (recommended read-only app)
+SRC_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SRC_SECRET=shpss_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# Generated via auth:src-token
 SRC_ADMIN_TOKEN=shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 # Destination Store
 DST_SHOP_DOMAIN=your-destination-store.myshopify.com
+# Destination app credentials (write scopes)
+DST_CLIENT_ID=yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+DST_SECRET=shpss_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+# Generated via auth:dst-token
 DST_ADMIN_TOKEN=shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 # API Configuration
@@ -76,31 +85,36 @@ cat test-defs.json | jq .
 
 ## Getting Admin API Tokens
 
-### For Private Apps (Recommended for Development)
+### Dev Dashboard + OAuth Flow (Current)
 
-1. Go to your Shopify admin
-2. Navigate to **Apps** → **App development** → **Create an app**
-3. Name your app (e.g., "Store Duplicator")
-4. Go to **API credentials** tab
-5. Click **Configure Admin API scopes**
-6. Enable these scopes:
-   - `read_products`, `write_products`
-   - `read_collections`, `write_collections`
-   - `read_metaobjects`, `write_metaobjects`
-   - `read_content`, `write_content`
-   - `read_files`, `write_files`
-   - `read_navigation`, `write_navigation`
-   - `read_online_store_pages`, `write_online_store_pages`
-   - `read_discounts`, `write_discounts`
-   - `read_markets`, `write_markets`
-7. Click **Save**
-8. Click **Install app**
-9. Copy the **Admin API access token** (starts with `shpat_`)
-10. Repeat for both source and destination stores
+1. Create app(s) in **Dev Dashboard** and release a version with scopes.
+2. Add allowed redirect URL(s):
+   - `http://localhost:3456/oauth/callback`
+   - `http://localhost:3457/oauth/callback`
+3. Install source app on source store and destination app on destination store.
+4. Configure `.env` with `SRC_*` and `DST_*` credentials.
+5. Generate tokens:
 
-### For Production
+```bash
+npm run cli -- auth:src-token
+npm run cli -- auth:dst-token
+```
 
-Consider using OAuth for production deployments. See [Shopify OAuth documentation](https://shopify.dev/docs/apps/auth/oauth).
+6. Approve each browser prompt and copy printed tokens into:
+   - `SRC_ADMIN_TOKEN`
+   - `DST_ADMIN_TOKEN`
+
+Recommended scope split:
+
+- Source (read-only):
+  - `read_products`, `read_collections`, `read_metaobjects`, `read_content`, `read_files`, `read_online_store_navigation`, `read_online_store_pages`, `read_discounts`, `read_markets`
+- Destination (write):
+  - `write_products`, `write_collections`, `write_metaobjects`, `write_content`, `write_files`, `write_online_store_navigation`, `write_online_store_pages`, `write_discounts`, `write_markets`
+
+### Token Notes
+
+- The OAuth flow generates `shpat_...` tokens used by this CLI.
+- If you change app scopes, generate fresh tokens again.
 
 ## First Run
 

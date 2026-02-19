@@ -13,6 +13,7 @@
     "clean": "npm run clean --workspaces",
     "dev": "npm run dev -w @shopify-duplicator/cli",
     "cli": "npm run dev -w @shopify-duplicator/cli --",
+    "metaobjects:publish-drafts": "node scripts/publish-draft-metaobjects.mjs",
     "test": "npm test --workspaces"
   },
   "engines": {

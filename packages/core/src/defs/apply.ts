@@ -39,7 +39,8 @@ export interface ApplyResult {
 async function applyMetaobjectDefinition(
   client: GraphQLClient,
   def: MetaobjectDefinition,
-  existingTypes: Map<string, string>
+  existingTypes: Map<string, string>,
+  sourceGidToType: Map<string, string>,
 ): Promise<{
   success: boolean;
   action: "created" | "updated" | "skipped";
@@ -52,6 +53,10 @@ async function applyMetaobjectDefinition(
       // Create new definition
       logger.debug(`Creating metaobject definition: ${def.type}`);
 
+      const sanitizedCapabilities = sanitizeMetaobjectCapabilities(
+        def.capabilities,
+      );
+
       const input = {
         type: def.type,
         name: def.name,
@@ -63,12 +68,16 @@ async function applyMetaobjectDefinition(
           description: field.description,
           required: field.required,
           type: field.type.name,
-          validations: field.validations?.map((v) => ({
+          validations: remapMetaobjectValidations(
+            field.validations,
+            sourceGidToType,
+            existingTypes,
+          )?.map((v) => ({
             name: v.name,
             value: v.value,
           })),
         })),
-        capabilities: def.capabilities,
+        capabilities: sanitizedCapabilities,
       };
 
       const result = await client.request({
@@ -92,6 +101,10 @@ async function applyMetaobjectDefinition(
         return { success: false, action: "skipped", error: errorMsg };
       }
 
+      if (response?.metaobjectDefinition?.id) {
+        existingTypes.set(def.type, response.metaobjectDefinition.id);
+      }
+
       return { success: true, action: "created" };
     } else {
       // Definition exists - for now, skip updates to avoid breaking changes
@@ -102,6 +115,27 @@ async function applyMetaobjectDefinition(
   } catch (error: any) {
     return { success: false, action: "skipped", error: error.message };
   }
+}
+
+function sanitizeMetaobjectCapabilities(
+  capabilities: MetaobjectDefinition["capabilities"],
+): MetaobjectDefinition["capabilities"] {
+  if (!capabilities) return capabilities;
+
+  const sanitized: MetaobjectDefinition["capabilities"] = {
+    ...capabilities,
+  };
+
+  if (sanitized.onlineStore?.data) {
+    sanitized.onlineStore = {
+      ...sanitized.onlineStore,
+      data: {
+        urlHandle: sanitized.onlineStore.data.urlHandle,
+      },
+    };
+  }
+
+  return sanitized;
 }
 
 /**
@@ -131,7 +165,7 @@ function isReservedMetafieldNamespace(namespace: string, key: string): boolean {
  * This is needed to remap metafield validation constraints.
  */
 function buildSourceMetaobjectGidToType(
-  sourceDefinitions: MetaobjectDefinition[]
+  sourceDefinitions: MetaobjectDefinition[],
 ): Map<string, string> {
   const gidToType = new Map<string, string>();
   for (const def of sourceDefinitions) {
@@ -149,7 +183,7 @@ function buildSourceMetaobjectGidToType(
 function remapMetaobjectValidations(
   validations: Array<{ name: string; value: string }> | undefined,
   sourceGidToType: Map<string, string>,
-  destTypeToGid: Map<string, string>
+  destTypeToGid: Map<string, string>,
 ): Array<{ name: string; value: string }> | undefined {
   if (!validations || validations.length === 0) {
     return validations;
@@ -163,7 +197,7 @@ function remapMetaobjectValidations(
 
       if (!sourceType) {
         logger.warn(
-          `Cannot remap metaobject validation: source type not found for GID ${sourceGid}`
+          `Cannot remap metaobject validation: source type not found for GID ${sourceGid}`,
         );
         return v;
       }
@@ -172,7 +206,7 @@ function remapMetaobjectValidations(
 
       if (!destGid) {
         logger.warn(
-          `Cannot remap metaobject validation: destination GID not found for type ${sourceType}`
+          `Cannot remap metaobject validation: destination GID not found for type ${sourceType}`,
         );
         return v;
       }
@@ -194,7 +228,7 @@ async function applyMetafieldDefinition(
   def: MetafieldDefinition,
   existingKeys: Set<string>,
   sourceGidToType: Map<string, string>,
-  destTypeToGid: Map<string, string>
+  destTypeToGid: Map<string, string>,
 ): Promise<{
   success: boolean;
   action: "created" | "updated" | "skipped";
@@ -207,14 +241,14 @@ async function applyMetafieldDefinition(
     if (!exists) {
       // Create new definition
       logger.debug(
-        `Creating metafield definition: ${def.namespace}.${def.key} (${def.ownerType})`
+        `Creating metafield definition: ${def.namespace}.${def.key} (${def.ownerType})`,
       );
 
       // Remap metaobject definition GIDs in validations
       const remappedValidations = remapMetaobjectValidations(
         def.validations,
         sourceGidToType,
-        destTypeToGid
+        destTypeToGid,
       );
 
       const input = {
@@ -260,7 +294,7 @@ async function applyMetafieldDefinition(
     } else {
       // Definition exists - skip to preserve existing data
       logger.debug(
-        `Metafield definition already exists: ${def.namespace}.${def.key}`
+        `Metafield definition already exists: ${def.namespace}.${def.key}`,
       );
       return { success: true, action: "skipped" };
     }
@@ -273,7 +307,7 @@ async function applyMetafieldDefinition(
  * Get existing metaobject definition types and their GIDs from destination.
  */
 async function getExistingMetaobjectTypes(
-  client: GraphQLClient
+  client: GraphQLClient,
 ): Promise<Map<string, string>> {
   const typeToGid = new Map<string, string>();
 
@@ -298,7 +332,7 @@ async function getExistingMetaobjectTypes(
       {
         getEdges: (data) => data.metaobjectDefinitions.edges,
         getPageInfo: (data) => data.metaobjectDefinitions.pageInfo,
-      }
+      },
     )) {
       typeToGid.set(def.type, def.id);
     }
@@ -315,7 +349,7 @@ async function getExistingMetaobjectTypes(
  * Get existing metafield definition keys from destination.
  */
 async function getExistingMetafieldKeys(
-  client: GraphQLClient
+  client: GraphQLClient,
 ): Promise<Set<string>> {
   const keys = new Set<string>();
 
@@ -352,7 +386,7 @@ async function getExistingMetafieldKeys(
         {
           getEdges: (data) => data.metafieldDefinitions.edges,
           getPageInfo: (data) => data.metafieldDefinitions.pageInfo,
-        }
+        },
       )) {
         const key = `${def.ownerType}:${def.namespace}:${def.key}`;
         keys.add(key);
@@ -380,11 +414,11 @@ function isReservedMetaobjectType(type: string): boolean {
  */
 export async function applyMetaobjectDefinitions(
   client: GraphQLClient,
-  definitions: MetaobjectDefinition[]
+  definitions: MetaobjectDefinition[],
 ): Promise<Result<ApplyResult, ShopifyApiError>> {
   // Filter out reserved types
   const customDefinitions = definitions.filter(
-    (def) => !isReservedMetaobjectType(def.type)
+    (def) => !isReservedMetaobjectType(def.type),
   );
   const reservedCount = definitions.length - customDefinitions.length;
 
@@ -395,12 +429,12 @@ export async function applyMetaobjectDefinitions(
         reserved: definitions
           .filter((d) => isReservedMetaobjectType(d.type))
           .map((d) => d.type),
-      }
+      },
     );
   }
 
   logger.info(
-    `Applying ${customDefinitions.length} custom metaobject definitions`
+    `Applying ${customDefinitions.length} custom metaobject definitions`,
   );
 
   const result: ApplyResult = {
@@ -413,6 +447,7 @@ export async function applyMetaobjectDefinitions(
 
   // Get existing types
   const existingTypes = await getExistingMetaobjectTypes(client);
+  const sourceGidToType = buildSourceMetaobjectGidToType(customDefinitions);
   logger.debug(`Found ${existingTypes.size} existing metaobject types`);
 
   // Apply each definition
@@ -420,7 +455,8 @@ export async function applyMetaobjectDefinitions(
     const applyResult = await applyMetaobjectDefinition(
       client,
       def,
-      existingTypes
+      existingTypes,
+      sourceGidToType,
     );
 
     if (applyResult.success) {
@@ -446,11 +482,11 @@ export async function applyMetaobjectDefinitions(
 export async function applyMetafieldDefinitions(
   client: GraphQLClient,
   definitions: MetafieldDefinition[],
-  sourceMetaobjectDefinitions: MetaobjectDefinition[]
+  sourceMetaobjectDefinitions: MetaobjectDefinition[],
 ): Promise<Result<ApplyResult, ShopifyApiError>> {
   // Filter out reserved namespaces
   const customDefinitions = definitions.filter(
-    (def) => !isReservedMetafieldNamespace(def.namespace, def.key)
+    (def) => !isReservedMetafieldNamespace(def.namespace, def.key),
   );
   const reservedCount = definitions.length - customDefinitions.length;
 
@@ -461,12 +497,12 @@ export async function applyMetafieldDefinitions(
         reserved: definitions
           .filter((d) => isReservedMetafieldNamespace(d.namespace, d.key))
           .map((d) => `${d.ownerType}:${d.namespace}.${d.key}`),
-      }
+      },
     );
   }
 
   logger.info(
-    `Applying ${customDefinitions.length} custom metafield definitions`
+    `Applying ${customDefinitions.length} custom metafield definitions`,
   );
 
   const result: ApplyResult = {
@@ -483,7 +519,7 @@ export async function applyMetafieldDefinitions(
 
   // Build metaobject GID mappings for validation remapping
   const sourceGidToType = buildSourceMetaobjectGidToType(
-    sourceMetaobjectDefinitions
+    sourceMetaobjectDefinitions,
   );
   const destTypeToGid = await getExistingMetaobjectTypes(client);
 
@@ -494,7 +530,7 @@ export async function applyMetafieldDefinitions(
       def,
       existingKeys,
       sourceGidToType,
-      destTypeToGid
+      destTypeToGid,
     );
 
     if (applyResult.success) {
@@ -519,7 +555,7 @@ export async function applyMetafieldDefinitions(
  */
 export async function applyDefinitions(
   client: GraphQLClient,
-  dump: DefinitionsDump
+  dump: DefinitionsDump,
 ): Promise<
   Result<{ metaobjects: ApplyResult; metafields: ApplyResult }, ShopifyApiError>
 > {
@@ -528,7 +564,7 @@ export async function applyDefinitions(
   // Apply metaobject definitions first
   const metaobjectResult = await applyMetaobjectDefinitions(
     client,
-    dump.metaobjectDefinitions
+    dump.metaobjectDefinitions,
   );
   if (!metaobjectResult.ok) {
     return err(metaobjectResult.error);
@@ -538,7 +574,7 @@ export async function applyDefinitions(
   const metafieldResult = await applyMetafieldDefinitions(
     client,
     dump.metafieldDefinitions,
-    dump.metaobjectDefinitions
+    dump.metaobjectDefinitions,
   );
   if (!metafieldResult.ok) {
     return err(metafieldResult.error);
